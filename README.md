@@ -1,5 +1,8 @@
 # peak-mem
 
+[![CI](https://github.com/peak-mem/peak-mem/actions/workflows/ci.yml/badge.svg)](https://github.com/peak-mem/peak-mem/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/peak-mem/peak-mem/actions/workflows/security.yml/badge.svg)](https://github.com/peak-mem/peak-mem/actions/workflows/security.yml)
+
 A lightweight, cross-platform memory usage monitor for any process. Track peak memory consumption with minimal overhead.
 
 ## Features
