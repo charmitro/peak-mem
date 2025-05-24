@@ -54,6 +54,7 @@ pub enum PeakMemError {
     ProcessSpawn(String),
 
     #[error("Failed to monitor process: {0}")]
+    #[allow(dead_code)] // Used in platform-specific code
     Monitor(String),
 
     #[error("Platform not supported: {0}")]

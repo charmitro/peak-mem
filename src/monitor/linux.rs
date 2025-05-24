@@ -3,7 +3,6 @@ use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use std::fs;
-use std::path::Path;
 
 pub struct LinuxMonitor;
 
