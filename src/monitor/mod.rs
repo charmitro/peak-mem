@@ -23,6 +23,7 @@ pub trait MemoryMonitor: Send + Sync {
 
     async fn get_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo>;
 
+    #[allow(dead_code)]
     async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>>;
 }
 
