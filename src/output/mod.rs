@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::types::MonitorResult;
+use crate::types::{MonitorResult, ProcessMemoryInfo};
 use anyhow::Result;
 use bytesize::ByteSize;
 use std::io::{self, Write};
@@ -7,9 +7,15 @@ use std::io::{self, Write};
 pub struct OutputFormatter;
 
 impl OutputFormatter {
-    pub fn format(result: &MonitorResult, format: OutputFormat) -> Result<()> {
+    pub fn format(result: &MonitorResult, format: OutputFormat, verbose: bool) -> Result<()> {
         match format {
-            OutputFormat::Human => Self::format_human(result),
+            OutputFormat::Human => {
+                if verbose {
+                    Self::format_verbose(result)
+                } else {
+                    Self::format_human(result)
+                }
+            }
             OutputFormat::Json => Self::format_json(result),
             OutputFormat::Csv => Self::format_csv(result),
             OutputFormat::Quiet => Self::format_quiet(result),
@@ -74,6 +80,149 @@ impl OutputFormatter {
         println!("{}", result.peak_rss_bytes);
         Ok(())
     }
+
+    fn format_verbose(result: &MonitorResult) -> Result<()> {
+        let mut stdout = io::stdout();
+
+        // Header
+        writeln!(stdout, "Command: {}", result.command)?;
+        if let Some(start_time) = result.start_time {
+            writeln!(
+                stdout,
+                "Started: {} UTC",
+                start_time.format("%Y-%m-%d %H:%M:%S")
+            )?;
+        }
+        if let Some(pid) = result.main_pid {
+            writeln!(stdout, "Process ID: {}", pid)?;
+        }
+        writeln!(stdout)?;
+
+        // Memory Usage Section
+        writeln!(stdout, "Memory Usage:")?;
+        writeln!(
+            stdout,
+            "  Peak RSS: {} ({} bytes)",
+            result.peak_rss(),
+            result.peak_rss_bytes
+        )?;
+        writeln!(
+            stdout,
+            "  Peak VSZ: {} ({} bytes)",
+            result.peak_vsz(),
+            result.peak_vsz_bytes
+        )?;
+        writeln!(stdout)?;
+
+        // Process Tree Section
+        if let Some(tree) = &result.process_tree {
+            let process_count = Self::count_processes(tree);
+            writeln!(
+                stdout,
+                "Process Tree: ({} processes monitored)",
+                process_count
+            )?;
+            Self::print_process_tree(&mut stdout, tree, "", true)?;
+        } else {
+            writeln!(
+                stdout,
+                "Process Tree: (monitoring disabled with --no-children)"
+            )?;
+        }
+        writeln!(stdout)?;
+
+        // Performance Section
+        writeln!(stdout, "Performance:")?;
+        writeln!(
+            stdout,
+            "  Duration: {:.3}s",
+            result.duration().as_secs_f64()
+        )?;
+        if let Some(sample_count) = result.sample_count {
+            writeln!(stdout, "  Samples collected: {}", sample_count)?;
+        }
+        writeln!(
+            stdout,
+            "  Sampling interval: {}ms",
+            result.duration_ms / result.sample_count.unwrap_or(1).max(1)
+        )?;
+        writeln!(stdout)?;
+
+        // Exit Status
+        if let Some(exit_code) = result.exit_code {
+            writeln!(
+                stdout,
+                "Exit Status: {} ({})",
+                exit_code,
+                if exit_code == 0 { "success" } else { "failed" }
+            )?;
+        }
+
+        // Threshold Status
+        if result.threshold_exceeded {
+            writeln!(stdout, "\n⚠️  THRESHOLD EXCEEDED")?;
+        }
+
+        stdout.flush()?;
+        Ok(())
+    }
+
+    fn count_processes(tree: &ProcessMemoryInfo) -> usize {
+        1 + tree
+            .children
+            .iter()
+            .map(Self::count_processes)
+            .sum::<usize>()
+    }
+
+    fn print_process_tree(
+        stdout: &mut dyn Write,
+        tree: &ProcessMemoryInfo,
+        prefix: &str,
+        is_last: bool,
+    ) -> Result<()> {
+        // Print current process
+        let connector = if is_last { "└── " } else { "├── " };
+        let name = if tree.name.len() > 40 {
+            format!("{}...", &tree.name[..37])
+        } else {
+            tree.name.clone()
+        };
+
+        writeln!(
+            stdout,
+            "{}{}{} (PID: {}) - Peak: {}",
+            prefix,
+            if prefix.is_empty() { "" } else { connector },
+            name,
+            tree.pid,
+            ByteSize::b(tree.memory.rss_bytes)
+        )?;
+
+        // Sort children by peak RSS (descending)
+        let mut children = tree.children.clone();
+        children.sort_by(|a, b| b.memory.rss_bytes.cmp(&a.memory.rss_bytes));
+
+        // Print children with proper tree structure
+        let child_prefix = format!(
+            "{}{}",
+            prefix,
+            if prefix.is_empty() {
+                ""
+            } else if is_last {
+                "    "
+            } else {
+                "│   "
+            }
+        );
+
+        for (i, child) in children.iter().enumerate() {
+            let is_last_child = i == children.len() - 1;
+            Self::print_process_tree(stdout, child, &child_prefix, is_last_child)?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct RealtimeDisplay {
@@ -135,6 +284,7 @@ impl RealtimeDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::MemoryUsage;
     use chrono::Utc;
 
     #[test]
@@ -149,9 +299,149 @@ mod tests {
             timestamp: Utc::now(),
             process_tree: None,
             timeline: None,
+            start_time: None,
+            sample_count: None,
+            main_pid: None,
         };
 
         // Quiet format should just print the RSS bytes
-        OutputFormatter::format(&result, OutputFormat::Quiet).unwrap();
+        OutputFormatter::format(&result, OutputFormat::Quiet, false).unwrap();
+    }
+
+    #[test]
+    fn test_format_verbose() {
+        let now = Utc::now();
+
+        // Create a sample process tree
+        let child_process = ProcessMemoryInfo {
+            pid: 12346,
+            name: "rustc".to_string(),
+            memory: MemoryUsage {
+                rss_bytes: 442_123_456,
+                vsz_bytes: 512_123_456,
+                timestamp: now,
+            },
+            children: vec![
+                ProcessMemoryInfo {
+                    pid: 12347,
+                    name: "cc".to_string(),
+                    memory: MemoryUsage {
+                        rss_bytes: 23_456_789,
+                        vsz_bytes: 45_678_901,
+                        timestamp: now,
+                    },
+                    children: vec![],
+                },
+                ProcessMemoryInfo {
+                    pid: 12348,
+                    name: "ld".to_string(),
+                    memory: MemoryUsage {
+                        rss_bytes: 89_123_456,
+                        vsz_bytes: 123_456_789,
+                        timestamp: now,
+                    },
+                    children: vec![],
+                },
+            ],
+        };
+
+        let root_process = ProcessMemoryInfo {
+            pid: 12345,
+            name: "cargo".to_string(),
+            memory: MemoryUsage {
+                rss_bytes: 45_234_567,
+                vsz_bytes: 78_901_234,
+                timestamp: now,
+            },
+            children: vec![child_process],
+        };
+
+        let result = MonitorResult {
+            command: "cargo build --release".to_string(),
+            peak_rss_bytes: 487_300_000,
+            peak_vsz_bytes: 892_100_000,
+            duration_ms: 14_263,
+            exit_code: Some(0),
+            threshold_exceeded: false,
+            timestamp: now,
+            process_tree: Some(root_process),
+            timeline: None,
+            start_time: Some(now),
+            sample_count: Some(142),
+            main_pid: Some(12345),
+        };
+
+        // Test verbose format - should not panic
+        OutputFormatter::format(&result, OutputFormat::Human, true).unwrap();
+    }
+
+    #[test]
+    fn test_format_verbose_no_children() {
+        let now = Utc::now();
+
+        let result = MonitorResult {
+            command: "echo test".to_string(),
+            peak_rss_bytes: 10_485_760,
+            peak_vsz_bytes: 20_971_520,
+            duration_ms: 100,
+            exit_code: Some(0),
+            threshold_exceeded: false,
+            timestamp: now,
+            process_tree: None,
+            timeline: None,
+            start_time: Some(now),
+            sample_count: Some(1),
+            main_pid: Some(99999),
+        };
+
+        // Test verbose format without process tree
+        OutputFormatter::format(&result, OutputFormat::Human, true).unwrap();
+    }
+
+    #[test]
+    fn test_count_processes() {
+        let now = Utc::now();
+        let tree = ProcessMemoryInfo {
+            pid: 1,
+            name: "root".to_string(),
+            memory: MemoryUsage {
+                rss_bytes: 1000,
+                vsz_bytes: 2000,
+                timestamp: now,
+            },
+            children: vec![
+                ProcessMemoryInfo {
+                    pid: 2,
+                    name: "child1".to_string(),
+                    memory: MemoryUsage {
+                        rss_bytes: 100,
+                        vsz_bytes: 200,
+                        timestamp: now,
+                    },
+                    children: vec![],
+                },
+                ProcessMemoryInfo {
+                    pid: 3,
+                    name: "child2".to_string(),
+                    memory: MemoryUsage {
+                        rss_bytes: 200,
+                        vsz_bytes: 400,
+                        timestamp: now,
+                    },
+                    children: vec![ProcessMemoryInfo {
+                        pid: 4,
+                        name: "grandchild".to_string(),
+                        memory: MemoryUsage {
+                            rss_bytes: 50,
+                            vsz_bytes: 100,
+                            timestamp: now,
+                        },
+                        children: vec![],
+                    }],
+                },
+            ],
+        };
+
+        assert_eq!(OutputFormatter::count_processes(&tree), 4);
     }
 }

@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
 
     // Start tracking
     let start_time = Instant::now();
+    let start_timestamp = chrono::Utc::now();
     let tracker_handle = tracker.start(args.interval).await;
 
     // Handle real-time display if requested
@@ -54,6 +55,13 @@ async fn main() -> Result<()> {
         false
     };
 
+    // Get process tree for verbose mode
+    let process_tree = if args.verbose && !args.no_children {
+        tracker.get_process_tree().await.ok()
+    } else {
+        None
+    };
+
     // Build result
     let result = types::MonitorResult {
         command: command_string,
@@ -63,12 +71,23 @@ async fn main() -> Result<()> {
         exit_code,
         threshold_exceeded,
         timestamp: chrono::Utc::now(),
-        process_tree: None,
+        process_tree,
         timeline: if args.timeline.is_some() {
             Some(tracker.timeline().await)
         } else {
             None
         },
+        start_time: if args.verbose {
+            Some(start_timestamp)
+        } else {
+            None
+        },
+        sample_count: if args.verbose {
+            Some(tracker.sample_count())
+        } else {
+            None
+        },
+        main_pid: if args.verbose { Some(pid) } else { None },
     };
 
     // Save timeline if requested
@@ -80,7 +99,7 @@ async fn main() -> Result<()> {
     }
 
     // Format output
-    OutputFormatter::format(&result, args.output_format())?;
+    OutputFormatter::format(&result, args.output_format(), args.verbose)?;
 
     // Exit with appropriate code
     if threshold_exceeded {

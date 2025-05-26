@@ -32,6 +32,12 @@ pub struct MonitorResult {
     pub process_tree: Option<ProcessMemoryInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeline: Option<Vec<MemoryUsage>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_pid: Option<u32>,
 }
 
 impl MonitorResult {
@@ -103,6 +109,9 @@ mod tests {
             timestamp: Utc::now(),
             process_tree: None,
             timeline: None,
+            start_time: None,
+            sample_count: None,
+            main_pid: None,
         };
 
         assert_eq!(result.peak_rss().to_string(), "100.0 MiB");
