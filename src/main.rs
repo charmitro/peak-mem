@@ -57,7 +57,13 @@ async fn main() -> Result<()> {
 
     // Get process tree for verbose mode
     let process_tree = if args.verbose && !args.no_children {
-        tracker.get_process_tree().await.ok()
+        match tracker.get_process_tree().await {
+            Ok(tree) => Some(tree),
+            Err(e) => {
+                eprintln!("Warning: Failed to get process tree: {}", e);
+                None
+            }
+        }
     } else {
         None
     };

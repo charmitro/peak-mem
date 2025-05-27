@@ -1,5 +1,5 @@
 use crate::monitor::{MemoryMonitor, SharedMonitor};
-use crate::types::{MemoryUsage, Result};
+use crate::types::{MemoryUsage, ProcessMemoryInfo, Result};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +15,7 @@ pub struct MemoryTracker {
     running: Arc<AtomicBool>,
     track_children: bool,
     sample_count: Arc<AtomicU64>,
+    peak_process_tree: Arc<RwLock<Option<ProcessMemoryInfo>>>,
 }
 
 impl MemoryTracker {
@@ -28,6 +29,7 @@ impl MemoryTracker {
             running: Arc::new(AtomicBool::new(false)),
             track_children,
             sample_count: Arc::new(AtomicU64::new(0)),
+            peak_process_tree: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -40,6 +42,7 @@ impl MemoryTracker {
         let running = Arc::clone(&self.running);
         let track_children = self.track_children;
         let sample_count = Arc::clone(&self.sample_count);
+        let peak_process_tree = Arc::clone(&self.peak_process_tree);
 
         running.store(true, Ordering::SeqCst);
 
@@ -49,14 +52,28 @@ impl MemoryTracker {
 
             // Sample immediately
             let monitor_guard = monitor.lock().await;
-            let memory_result = if track_children {
-                Self::get_tree_memory(&**monitor_guard, pid).await
-            } else {
-                monitor_guard.get_memory_usage(pid).await
-            };
-            drop(monitor_guard);
+            if track_children {
+                if let Ok(tree) = monitor_guard.get_process_tree(pid).await {
+                    let mut total_rss = 0u64;
+                    let mut total_vsz = 0u64;
+                    Self::sum_tree_memory(&tree, &mut total_rss, &mut total_vsz);
 
-            if let Ok(usage) = memory_result {
+                    peak_rss.store(total_rss, Ordering::SeqCst);
+                    peak_vsz.store(total_vsz, Ordering::SeqCst);
+                    sample_count.fetch_add(1, Ordering::SeqCst);
+
+                    // Store initial process tree
+                    let mut pt = peak_process_tree.write().await;
+                    *pt = Some(tree.clone());
+
+                    let mut tl = timeline.write().await;
+                    tl.push(MemoryUsage {
+                        rss_bytes: total_rss,
+                        vsz_bytes: total_vsz,
+                        timestamp: tree.memory.timestamp,
+                    });
+                }
+            } else if let Ok(usage) = monitor_guard.get_memory_usage(pid).await {
                 peak_rss.store(usage.rss_bytes, Ordering::SeqCst);
                 peak_vsz.store(usage.vsz_bytes, Ordering::SeqCst);
                 sample_count.fetch_add(1, Ordering::SeqCst);
@@ -64,34 +81,66 @@ impl MemoryTracker {
                 let mut tl = timeline.write().await;
                 tl.push(usage);
             }
+            drop(monitor_guard);
 
             while running.load(Ordering::SeqCst) {
                 interval.tick().await;
 
                 let monitor = monitor.lock().await;
-                let memory_result = if track_children {
-                    Self::get_tree_memory(&**monitor, pid).await
-                } else {
-                    monitor.get_memory_usage(pid).await
-                };
-                drop(monitor);
+                if track_children {
+                    match monitor.get_process_tree(pid).await {
+                        Ok(tree) => {
+                            let mut total_rss = 0u64;
+                            let mut total_vsz = 0u64;
+                            Self::sum_tree_memory(&tree, &mut total_rss, &mut total_vsz);
 
-                match memory_result {
-                    Ok(usage) => {
-                        // Update peaks
-                        peak_rss.fetch_max(usage.rss_bytes, Ordering::SeqCst);
-                        peak_vsz.fetch_max(usage.vsz_bytes, Ordering::SeqCst);
-                        sample_count.fetch_add(1, Ordering::SeqCst);
+                            // Check if this is a new peak
+                            let old_peak = peak_rss.load(Ordering::SeqCst);
+                            if total_rss > old_peak {
+                                peak_rss.store(total_rss, Ordering::SeqCst);
+                                peak_vsz.store(total_vsz, Ordering::SeqCst);
 
-                        // Add to timeline
-                        let mut tl = timeline.write().await;
-                        tl.push(usage);
+                                // Update peak process tree
+                                let mut pt = peak_process_tree.write().await;
+                                *pt = Some(tree.clone());
+                            } else {
+                                peak_rss.fetch_max(total_rss, Ordering::SeqCst);
+                                peak_vsz.fetch_max(total_vsz, Ordering::SeqCst);
+                            }
+
+                            sample_count.fetch_add(1, Ordering::SeqCst);
+
+                            let mut tl = timeline.write().await;
+                            tl.push(MemoryUsage {
+                                rss_bytes: total_rss,
+                                vsz_bytes: total_vsz,
+                                timestamp: tree.memory.timestamp,
+                            });
+                        }
+                        Err(_) => {
+                            // Process likely terminated
+                            break;
+                        }
                     }
-                    Err(_) => {
-                        // Process likely terminated
-                        break;
+                } else {
+                    match monitor.get_memory_usage(pid).await {
+                        Ok(usage) => {
+                            // Update peaks
+                            peak_rss.fetch_max(usage.rss_bytes, Ordering::SeqCst);
+                            peak_vsz.fetch_max(usage.vsz_bytes, Ordering::SeqCst);
+                            sample_count.fetch_add(1, Ordering::SeqCst);
+
+                            // Add to timeline
+                            let mut tl = timeline.write().await;
+                            tl.push(usage);
+                        }
+                        Err(_) => {
+                            // Process likely terminated
+                            break;
+                        }
                     }
                 }
+                drop(monitor);
             }
         })
     }
@@ -117,22 +166,9 @@ impl MemoryTracker {
     }
 
     pub async fn get_process_tree(&self) -> Result<crate::types::ProcessMemoryInfo> {
-        let monitor = self.monitor.lock().await;
-        monitor.get_process_tree(self.pid).await
-    }
-
-    async fn get_tree_memory(monitor: &dyn MemoryMonitor, pid: u32) -> Result<MemoryUsage> {
-        let tree = monitor.get_process_tree(pid).await?;
-
-        let mut total_rss = 0u64;
-        let mut total_vsz = 0u64;
-
-        Self::sum_tree_memory(&tree, &mut total_rss, &mut total_vsz);
-
-        Ok(MemoryUsage {
-            rss_bytes: total_rss,
-            vsz_bytes: total_vsz,
-            timestamp: tree.memory.timestamp,
+        let tree_lock = self.peak_process_tree.read().await;
+        tree_lock.clone().ok_or_else(|| {
+            crate::types::PeakMemError::ProcessSpawn("No process tree available".to_string())
         })
     }
 
@@ -170,5 +206,88 @@ mod tests {
 
         let timeline = tracker.timeline().await;
         assert!(!timeline.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_process_tree_capture() {
+        let monitor = create_monitor().unwrap();
+        let pid = std::process::id();
+        let tracker = MemoryTracker::new(monitor, pid, true);
+
+        let handle = tracker.start(10).await;
+
+        // Let it run for a bit to capture tree
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        tracker.stop();
+        handle.await.unwrap();
+
+        // Should have captured process tree
+        let tree_result = tracker.get_process_tree().await;
+        assert!(tree_result.is_ok());
+
+        let tree = tree_result.unwrap();
+        assert_eq!(tree.pid, pid);
+        assert!(!tree.name.is_empty());
+        assert!(tree.memory.rss_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_process_tree_with_children() {
+        use tokio::process::Command;
+
+        // Different commands for different platforms due to process tree handling
+        // differences
+        #[cfg(target_os = "macos")]
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg("import subprocess, time; procs = [subprocess.Popen(['sleep', '1']) for _ in range(2)]; time.sleep(0.5); [p.wait() for p in procs]")
+            .spawn()
+            .expect("Failed to spawn test process");
+
+        #[cfg(not(target_os = "macos"))]
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 0.2 & sleep 0.2 & wait")
+            .spawn()
+            .expect("Failed to spawn test process");
+
+        let pid = child.id().expect("Failed to get PID");
+
+        let monitor = create_monitor().unwrap();
+        let tracker = MemoryTracker::new(monitor, pid, true);
+
+        let handle = tracker.start(10).await;
+
+        // Let it run to capture children - need more time on macOS
+        #[cfg(target_os = "macos")]
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        #[cfg(not(target_os = "macos"))]
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Check we captured a tree with children
+        let tree_result = tracker.get_process_tree().await;
+        assert!(tree_result.is_ok());
+
+        let tree = tree_result.unwrap();
+        assert_eq!(tree.pid, pid);
+
+        // Count total processes in tree
+        fn count_processes(tree: &crate::types::ProcessMemoryInfo) -> usize {
+            1 + tree.children.iter().map(count_processes).sum::<usize>()
+        }
+
+        let total = count_processes(&tree);
+        assert!(
+            total >= 3,
+            "Expected at least 3 processes (parent + 2 children), got {}",
+            total
+        );
+
+        tracker.stop();
+
+        // Clean up
+        let _ = child.wait().await;
+        handle.await.unwrap();
     }
 }
