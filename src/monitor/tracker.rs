@@ -236,16 +236,7 @@ mod tests {
     async fn test_process_tree_with_children() {
         use tokio::process::Command;
 
-        // Different commands for different platforms due to process tree handling
-        // differences
-        #[cfg(target_os = "macos")]
-        let mut child = Command::new("python3")
-            .arg("-c")
-            .arg("import subprocess, time; procs = [subprocess.Popen(['sleep', '1']) for _ in range(2)]; time.sleep(0.5); [p.wait() for p in procs]")
-            .spawn()
-            .expect("Failed to spawn test process");
-
-        #[cfg(not(target_os = "macos"))]
+        // Spawn a shell with sleep children
         let mut child = Command::new("sh")
             .arg("-c")
             .arg("sleep 0.2 & sleep 0.2 & wait")
@@ -259,10 +250,7 @@ mod tests {
 
         let handle = tracker.start(10).await;
 
-        // Let it run to capture children - need more time on macOS
-        #[cfg(target_os = "macos")]
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        #[cfg(not(target_os = "macos"))]
+        // Let it run to capture children
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Check we captured a tree with children
@@ -272,17 +260,13 @@ mod tests {
         let tree = tree_result.unwrap();
         assert_eq!(tree.pid, pid);
 
-        // Count total processes in tree
-        fn count_processes(tree: &crate::types::ProcessMemoryInfo) -> usize {
-            1 + tree.children.iter().map(count_processes).sum::<usize>()
-        }
-
-        let total = count_processes(&tree);
+        // Should have at least 2 sleep children
         assert!(
-            total >= 3,
-            "Expected at least 3 processes (parent + 2 children), got {}",
-            total
+            tree.children.len() >= 2,
+            "Expected at least 2 children, got {}",
+            tree.children.len()
         );
+        println!("PEOS {}", tree.children.len());
 
         tracker.stop();
 
