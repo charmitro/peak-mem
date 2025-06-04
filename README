@@ -1,0 +1,51 @@
+peak-mem
+
+Monitor peak memory usage of processes.
+
+INSTALLATION
+
+    cargo install --path .
+
+USAGE
+
+    peak-mem [OPTIONS] -- COMMAND [ARGS...]
+
+OPTIONS
+
+    -h, --help              Show help
+    -V, --version           Show version
+    -j, --json              Output JSON
+    -c, --csv               Output CSV
+    -q, --quiet             Output only RSS in bytes
+    -v, --verbose           Show process breakdown
+    -w, --watch             Show real-time usage
+    -t, --threshold SIZE    Set memory threshold
+    --no-children           Don't track child processes
+    --timeline FILE         Record timeline
+    --interval MS           Sampling interval (default: 100)
+
+EXAMPLES
+
+    Basic usage:
+    peak-mem -- cargo build
+
+    JSON output:
+    peak-mem --json -- ./myapp
+
+    Set 1GB threshold:
+    peak-mem --threshold 1G -- ./test
+
+BUILDING
+
+    cargo build --release
+
+PLATFORM SUPPORT
+
+    Linux    - Implemented via /proc
+    macOS    - Implemented via proc_pidinfo
+    FreeBSD  - Not implemented
+    Windows  - Not implemented
+
+LICENSE
+
+MIT
