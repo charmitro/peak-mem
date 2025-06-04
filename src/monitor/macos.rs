@@ -71,118 +71,109 @@ impl MemoryMonitor for MacOSMonitor {
     }
 
     async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>> {
-        // Use sysctl to get process list
-        use libc::{sysctl, CTL_KERN, KERN_PROC, KERN_PROC_ALL};
+        // Use libproc to get process list - the modern macOS approach
+        // This is more reliable than parsing sysctl's kinfo_proc structure
+        // which has undocumented layout changes between macOS versions
         use std::ptr;
 
-        #[repr(C)]
-        struct KinfoProcDarwin {
-            kp_proc: ExternProc,
-            kp_eproc: EProc,
+        // External functions from libproc
+        extern "C" {
+            fn proc_listpids(
+                type_: u32,
+                typeinfo: u32,
+                buffer: *mut libc::c_void,
+                buffersize: libc::c_int,
+            ) -> libc::c_int;
+
+            fn proc_pidinfo(
+                pid: libc::c_int,
+                flavor: libc::c_int,
+                arg: u64,
+                buffer: *mut libc::c_void,
+                buffersize: libc::c_int,
+            ) -> libc::c_int;
         }
 
-        #[repr(C)]
-        struct ExternProc {
-            p_un: [u8; 16],
-            p_vmspace: u64,
-            p_sigacts: u64,
-            p_flag: i32,
-            p_stat: i8,
-            p_pid: i32,
-            p_oppid: i32,
-            p_dupfd: i32,
-            // ... other fields we don't need
-        }
+        const PROC_ALL_PIDS: u32 = 1;
+        const PROC_PIDTBSDINFO: libc::c_int = 3;
 
         #[repr(C)]
-        struct EProc {
-            e_paddr: *mut u8,
-            e_sess: *mut u8,
-            e_pcred: PCredDarwin,
-            e_ucred: UCredDarwin,
-            e_spare: [i32; 3],
-            e_tsess: *mut u8,
-            e_wmesg: [i8; 8],
-            e_xsize: i32,
-            e_xrssize: i16,
-            e_xccount: i16,
-            e_xswrss: i16,
-            e_ppid: i32,
-            // ... other fields we don't need
+        struct proc_bsdinfo {
+            pbi_flags: u32,
+            pbi_status: u32,
+            pbi_xstatus: u32,
+            pbi_pid: u32,
+            pbi_ppid: u32,
+            pbi_uid: libc::uid_t,
+            pbi_gid: libc::gid_t,
+            pbi_ruid: libc::uid_t,
+            pbi_rgid: libc::gid_t,
+            pbi_svuid: libc::uid_t,
+            pbi_svgid: libc::gid_t,
+            rfu_1: u32,
+            pbi_comm: [libc::c_char; 16],
+            pbi_name: [libc::c_char; 32],
+            pbi_nfiles: u32,
+            pbi_pgid: u32,
+            pbi_pjobc: u32,
+            e_tdev: u32,
+            e_tpgid: u32,
+            pbi_nice: libc::c_int,
+            pbi_start_tvsec: u64,
+            pbi_start_tvusec: u64,
         }
 
-        #[repr(C)]
-        struct PCredDarwin {
-            pc_lock: [i8; 72],
-            pc_ucred: *mut u8,
-            p_ruid: u32,
-            p_svuid: u32,
-            p_rgid: u32,
-            p_svgid: u32,
-            p_refcnt: i32,
+        // Get the size needed for all PIDs
+        let buffer_size = unsafe { proc_listpids(PROC_ALL_PIDS, 0, ptr::null_mut(), 0) };
+
+        if buffer_size <= 0 {
+            return Err(PeakMemError::Monitor(
+                "Failed to get process list size".to_string(),
+            ));
         }
 
-        #[repr(C)]
-        struct UCredDarwin {
-            cr_ref: i32,
-            cr_uid: u32,
-            cr_ngroups: i16,
-            cr_groups: [u32; 16],
-        }
+        // Allocate buffer for PIDs
+        let pid_count = (buffer_size as usize) / mem::size_of::<libc::pid_t>();
+        let mut pids = vec![0 as libc::pid_t; pid_count];
 
-        let mut mib = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0];
-        let mut size = 0;
-
-        // Get required buffer size
-        unsafe {
-            if sysctl(
-                mib.as_mut_ptr(),
-                4,
-                ptr::null_mut(),
-                &mut size,
-                ptr::null_mut(),
+        // Get all PIDs
+        let bytes_returned = unsafe {
+            proc_listpids(
+                PROC_ALL_PIDS,
                 0,
-            ) != 0
-            {
-                return Err(PeakMemError::Monitor(
-                    "Failed to get process list size".to_string(),
-                ));
-            }
+                pids.as_mut_ptr() as *mut libc::c_void,
+                buffer_size,
+            )
+        };
+
+        if bytes_returned <= 0 {
+            return Err(PeakMemError::Monitor(
+                "Failed to get process list".to_string(),
+            ));
         }
 
-        // Allocate buffer
-        let mut buf = vec![0u8; size];
-
-        // Get process list
-        unsafe {
-            if sysctl(
-                mib.as_mut_ptr(),
-                4,
-                buf.as_mut_ptr() as *mut _,
-                &mut size,
-                ptr::null_mut(),
-                0,
-            ) != 0
-            {
-                return Err(PeakMemError::Monitor(
-                    "Failed to get process list".to_string(),
-                ));
-            }
-        }
-
-        // Parse process list for children
+        let actual_pid_count = (bytes_returned as usize) / mem::size_of::<libc::pid_t>();
         let mut children = Vec::new();
-        let proc_size = mem::size_of::<KinfoProcDarwin>();
-        let proc_count = size / proc_size;
 
-        for i in 0..proc_count {
-            let proc = unsafe { &*(buf.as_ptr().add(i * proc_size) as *const KinfoProcDarwin) };
+        // Check each PID to see if it's a child of our target
+        for &check_pid in pids.iter().take(actual_pid_count) {
+            if check_pid == 0 {
+                continue;
+            }
 
-            let ppid = proc.kp_eproc.e_ppid as u32;
-            let child_pid = proc.kp_proc.p_pid as u32;
+            let mut proc_info: proc_bsdinfo = unsafe { mem::zeroed() };
+            let ret = unsafe {
+                proc_pidinfo(
+                    check_pid,
+                    PROC_PIDTBSDINFO,
+                    0,
+                    &mut proc_info as *mut _ as *mut libc::c_void,
+                    mem::size_of::<proc_bsdinfo>() as libc::c_int,
+                )
+            };
 
-            if ppid == pid && child_pid != 0 {
-                children.push(child_pid);
+            if ret == mem::size_of::<proc_bsdinfo>() as libc::c_int && proc_info.pbi_ppid == pid {
+                children.push(check_pid as u32);
             }
         }
 

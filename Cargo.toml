@@ -31,6 +31,9 @@ codegen-units = 1
 strip = true
 opt-level = 3
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.17.0"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 mach2 = "0.4.2"
 

@@ -2,7 +2,7 @@ use crate::monitor::MemoryMonitor;
 use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result};
 use async_trait::async_trait;
 use chrono::Utc;
-use std::fs;
+use procfs::process::Process;
 
 pub struct LinuxMonitor;
 
@@ -12,37 +12,31 @@ impl LinuxMonitor {
     }
 
     fn read_proc_status(&self, pid: u32) -> Result<(u64, u64)> {
-        let status_path = format!("/proc/{}/status", pid);
-        let content = fs::read_to_string(&status_path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
+        let process = Process::new(pid as i32).map_err(|e| match e {
+            procfs::ProcError::NotFound(_) => {
                 PeakMemError::ProcessSpawn(format!("Process {} not found", pid))
-            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                PeakMemError::PermissionDenied(format!("Cannot access process {}", pid))
-            } else {
-                e.into()
             }
+            procfs::ProcError::PermissionDenied(_) => {
+                PeakMemError::PermissionDenied(format!("Cannot access process {}", pid))
+            }
+            _ => PeakMemError::ProcessSpawn(format!("Failed to access process {}: {}", pid, e)),
         })?;
 
-        let mut rss_kb = 0u64;
-        let mut vsz_kb = 0u64;
+        let status = process.status().map_err(|e| {
+            PeakMemError::ProcessSpawn(format!("Failed to read process {} status: {}", pid, e))
+        })?;
 
-        for line in content.lines() {
-            if let Some(rss_str) = line.strip_prefix("VmRSS:") {
-                rss_kb = parse_kb_value(rss_str)?;
-            } else if let Some(vsz_str) = line.strip_prefix("VmSize:") {
-                vsz_kb = parse_kb_value(vsz_str)?;
-            }
-        }
+        let rss_bytes = status.vmrss.unwrap_or(0) * 1024;
+        let vsz_bytes = status.vmsize.unwrap_or(0) * 1024;
 
-        Ok((rss_kb * 1024, vsz_kb * 1024))
+        Ok((rss_bytes, vsz_bytes))
     }
 
     fn get_process_name(&self, pid: u32) -> String {
-        let comm_path = format!("/proc/{}/comm", pid);
-        fs::read_to_string(comm_path)
+        Process::new(pid as i32)
+            .and_then(|p| p.stat())
+            .map(|stat| stat.comm)
             .unwrap_or_else(|_| format!("pid:{}", pid))
-            .trim()
-            .to_string()
     }
 }
 
@@ -79,84 +73,26 @@ impl MemoryMonitor for LinuxMonitor {
     }
 
     async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>> {
-        let children_path = format!("/proc/{}/task/{}/children", pid, pid);
+        let mut children = Vec::new();
 
-        match fs::read_to_string(&children_path) {
-            Ok(content) => {
-                let pids: Vec<u32> = content
-                    .split_whitespace()
-                    .filter_map(|s| s.parse::<u32>().ok())
-                    .collect();
-                Ok(pids)
-            }
-            Err(_) => {
-                // Fallback: scan /proc for processes with matching ppid
-                let mut children = Vec::new();
-                if let Ok(entries) = fs::read_dir("/proc") {
-                    for entry in entries.flatten() {
-                        if let Ok(name) = entry.file_name().into_string() {
-                            if let Ok(child_pid) = name.parse::<u32>() {
-                                if let Ok(stat) = read_proc_stat(child_pid) {
-                                    if stat.ppid == pid {
-                                        children.push(child_pid);
-                                    }
-                                }
-                            }
-                        }
+        // Use procfs to iterate through all processes
+        if let Ok(all_procs) = procfs::process::all_processes() {
+            for process in all_procs.flatten() {
+                if let Ok(stat) = process.stat() {
+                    if stat.ppid == pid as i32 {
+                        children.push(stat.pid as u32);
                     }
                 }
-                Ok(children)
             }
         }
+
+        Ok(children)
     }
-}
-
-fn parse_kb_value(s: &str) -> Result<u64> {
-    let s = s.trim();
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err(PeakMemError::Parse("Empty memory value".to_string()));
-    }
-
-    parts[0]
-        .parse::<u64>()
-        .map_err(|e| PeakMemError::Parse(format!("Failed to parse memory value: {}", e)))
-}
-
-struct ProcStat {
-    ppid: u32,
-}
-
-fn read_proc_stat(pid: u32) -> Result<ProcStat> {
-    let stat_path = format!("/proc/{}/stat", pid);
-    let content = fs::read_to_string(stat_path)?;
-
-    // Find the last ')' to handle process names with spaces/parentheses
-    if let Some(pos) = content.rfind(')') {
-        let fields: Vec<&str> = content[pos + 1..].split_whitespace().collect();
-        if fields.len() >= 2 {
-            let ppid = fields[1]
-                .parse::<u32>()
-                .map_err(|e| PeakMemError::Parse(format!("Failed to parse ppid: {}", e)))?;
-            return Ok(ProcStat { ppid });
-        }
-    }
-
-    Err(PeakMemError::Parse(
-        "Invalid /proc/pid/stat format".to_string(),
-    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_kb_value() {
-        assert_eq!(parse_kb_value("1024 kB").unwrap(), 1024);
-        assert_eq!(parse_kb_value("  2048   kB  ").unwrap(), 2048);
-        assert_eq!(parse_kb_value("0 kB").unwrap(), 0);
-    }
 
     #[tokio::test]
     async fn test_get_memory_usage_self() {
