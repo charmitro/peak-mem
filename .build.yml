@@ -1,0 +1,40 @@
+image: alpine/edge
+packages:
+  - curl
+  - git
+  - build-base
+sources:
+  - https://git.sr.ht/~charmitro/peak-mem
+tasks:
+  - setup: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      . "$HOME/.cargo/env"
+      rustup component add rustfmt clippy
+  - fmt: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo fmt -- --check
+  - clippy: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo clippy --all-targets --all-features -- -D warnings
+  - test: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo test --verbose
+  - build: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo build --release --verbose
+  - test-binary: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      ./target/release/peak-mem -- echo "Hello, CI!"
+      ./target/release/peak-mem --json -- echo "JSON test"
+      ./target/release/peak-mem --csv -- echo "CSV test"
+      ./target/release/peak-mem --quiet -- echo "Quiet test"
+  - msrv: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      rustup install 1.87
+      cargo +1.87 check --verbose

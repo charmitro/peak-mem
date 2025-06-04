@@ -1,0 +1,25 @@
+image: debian/stable
+packages:
+  - curl
+  - git
+  - build-essential
+sources:
+  - https://git.sr.ht/~charmitro/peak-mem
+tasks:
+  - setup: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      . "$HOME/.cargo/env"
+  - test: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo test --verbose
+  - build: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      cargo build --release --verbose
+  - test-binary: |
+      cd peak-mem
+      . "$HOME/.cargo/env"
+      ./target/release/peak-mem -- echo "Hello from Debian!"
+      ./target/release/peak-mem --json -- ps aux
+      ./target/release/peak-mem --csv -- ls -la

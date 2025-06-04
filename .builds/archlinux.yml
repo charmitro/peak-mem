@@ -1,0 +1,18 @@
+image: archlinux
+packages:
+  - rust
+  - git
+sources:
+  - https://git.sr.ht/~charmitro/peak-mem
+tasks:
+  - test: |
+      cd peak-mem
+      cargo test --verbose
+  - build: |
+      cd peak-mem
+      cargo build --release --verbose
+  - test-binary: |
+      cd peak-mem
+      ./target/release/peak-mem -- echo "Hello from Arch Linux!"
+      ./target/release/peak-mem --json -- echo "JSON test"
+      ./target/release/peak-mem --csv -- echo "CSV test"

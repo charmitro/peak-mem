@@ -1,0 +1,14 @@
+image: freebsd/latest
+packages:
+  - rust
+sources:
+  - https://git.sr.ht/~charmitro/peak-mem
+tasks:
+  - check: |
+      cd peak-mem
+      # Only run compilation check since FreeBSD support is not implemented
+      cargo check --verbose
+  - build: |
+      cd peak-mem
+      # Build to ensure it compiles, but don't run
+      cargo build --release --verbose
