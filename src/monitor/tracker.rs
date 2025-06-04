@@ -14,6 +14,7 @@ pub struct MemoryTracker {
     timeline: Arc<RwLock<Vec<MemoryUsage>>>,
     running: Arc<AtomicBool>,
     track_children: bool,
+    sample_count: Arc<AtomicU64>,
 }
 
 impl MemoryTracker {
@@ -26,6 +27,7 @@ impl MemoryTracker {
             timeline: Arc::new(RwLock::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
             track_children,
+            sample_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -37,6 +39,7 @@ impl MemoryTracker {
         let timeline = Arc::clone(&self.timeline);
         let running = Arc::clone(&self.running);
         let track_children = self.track_children;
+        let sample_count = Arc::clone(&self.sample_count);
 
         running.store(true, Ordering::SeqCst);
 
@@ -56,6 +59,7 @@ impl MemoryTracker {
             if let Ok(usage) = memory_result {
                 peak_rss.store(usage.rss_bytes, Ordering::SeqCst);
                 peak_vsz.store(usage.vsz_bytes, Ordering::SeqCst);
+                sample_count.fetch_add(1, Ordering::SeqCst);
 
                 let mut tl = timeline.write().await;
                 tl.push(usage);
@@ -77,6 +81,7 @@ impl MemoryTracker {
                         // Update peaks
                         peak_rss.fetch_max(usage.rss_bytes, Ordering::SeqCst);
                         peak_vsz.fetch_max(usage.vsz_bytes, Ordering::SeqCst);
+                        sample_count.fetch_add(1, Ordering::SeqCst);
 
                         // Add to timeline
                         let mut tl = timeline.write().await;
@@ -105,6 +110,15 @@ impl MemoryTracker {
 
     pub async fn timeline(&self) -> Vec<MemoryUsage> {
         self.timeline.read().await.clone()
+    }
+
+    pub fn sample_count(&self) -> u64 {
+        self.sample_count.load(Ordering::SeqCst)
+    }
+
+    pub async fn get_process_tree(&self) -> Result<crate::types::ProcessMemoryInfo> {
+        let monitor = self.monitor.lock().await;
+        monitor.get_process_tree(self.pid).await
     }
 
     async fn get_tree_memory(monitor: &dyn MemoryMonitor, pid: u32) -> Result<MemoryUsage> {
