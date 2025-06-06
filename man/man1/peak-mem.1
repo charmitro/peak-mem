@@ -1,0 +1,196 @@
+.TH PEAK-MEM 1 "January 2025" "peak-mem 0.1.0" "User Commands"
+.SH NAME
+peak-mem \- monitor peak memory usage of processes
+.SH SYNOPSIS
+.B peak-mem
+[\fIOPTIONS\fR]
+.B \-\-
+\fICOMMAND\fR [\fIARGS\fR...]
+.SH DESCRIPTION
+.B peak-mem
+is a lightweight memory usage monitor that tracks and reports the peak memory
+usage of a process and its children during execution. It provides both
+real-time monitoring and post-execution reporting with minimal overhead.
+.PP
+The tool monitors both RSS (Resident Set Size) and VSZ (Virtual Size) memory
+metrics, tracking the maximum values reached during the lifetime of the
+monitored process.
+.SH OPTIONS
+.SS Output Format Options
+.TP
+.BR \-j ", " \-\-json
+Output results in JSON format. Useful for parsing by other tools.
+.TP
+.BR \-c ", " \-\-csv
+Output results in CSV format. The output includes headers and is suitable
+for importing into spreadsheets or data analysis tools.
+.TP
+.BR \-q ", " \-\-quiet
+Quiet mode. Only output the peak RSS value in bytes with no formatting.
+Useful for scripting.
+.TP
+.BR \-v ", " \-\-verbose
+Show detailed breakdown including process tree. Displays memory usage for
+each process in the hierarchy.
+.SS Monitoring Options
+.TP
+.BR \-w ", " \-\-watch
+Display real-time memory usage during execution. Updates the display
+continuously as the process runs.
+.TP
+.BR \-t ", " \-\-threshold " " \fISIZE\fR
+Set a memory threshold alert. Accepts values like 512M, 1G, 2GB.
+The program will indicate if the threshold is exceeded.
+.TP
+.B \-\-no\-children
+Don't track child processes. By default, peak-mem monitors the entire
+process tree.
+.TP
+.BR \-\-timeline " " \fIFILE\fR
+Record detailed memory timeline to the specified file. The timeline
+includes timestamps and memory values for later analysis.
+.TP
+.BR \-\-interval " " \fIMS\fR
+Set the sampling interval in milliseconds (default: 100). Lower values
+provide more accurate peak detection but increase overhead.
+.SS Standard Options
+.TP
+.BR \-h ", " \-\-help
+Display help message and exit.
+.TP
+.BR \-V ", " \-\-version
+Display version information and exit.
+.SH EXAMPLES
+.SS Basic Usage
+Monitor memory usage of a cargo build:
+.PP
+.RS
+.B peak-mem -- cargo build
+.RE
+.SS JSON Output
+Get machine-readable output:
+.PP
+.RS
+.B peak-mem --json -- ./myapp
+.RE
+.SS Memory Threshold
+Alert if memory usage exceeds 1GB:
+.PP
+.RS
+.B peak-mem --threshold 1G -- ./memory-intensive-app
+.RE
+.SS Real-time Monitoring
+Watch memory usage as it happens:
+.PP
+.RS
+.B peak-mem --watch -- ./long-running-process
+.RE
+.SS Timeline Recording
+Record detailed timeline for analysis:
+.PP
+.RS
+.B peak-mem --timeline memory.json -- ./app
+.RE
+.SS Process-only Monitoring
+Monitor only the main process, ignoring children:
+.PP
+.RS
+.B peak-mem --no-children -- ./parent-process
+.RE
+.SS Combined Options
+Verbose output with threshold and timeline:
+.PP
+.RS
+.B peak-mem -v --threshold 2G --timeline mem.json -- make -j8
+.RE
+.SH OUTPUT FORMATS
+.SS Human-readable (default)
+Shows peak RSS and VSZ in human-readable units (KB, MB, GB) along with
+the monitored command and exit status.
+.SS JSON Format (-j)
+Outputs a JSON object containing:
+.RS
+.IP \(bu 2
+command: The executed command with arguments
+.IP \(bu 2
+peak_rss_bytes: Peak RSS in bytes
+.IP \(bu 2
+peak_vsz_bytes: Peak VSZ in bytes
+.IP \(bu 2
+duration_ms: Execution time in milliseconds
+.IP \(bu 2
+exit_code: Process exit code
+.IP \(bu 2
+threshold_exceeded: Boolean (if threshold was set)
+.IP \(bu 2
+tracked_children: Boolean indicating if children were tracked
+.RE
+.SS CSV Format (-c)
+Outputs CSV with headers:
+.RS
+command,peak_rss_bytes,peak_vsz_bytes,duration_ms,exit_code
+.RE
+.SS Quiet Format (-q)
+Outputs only the peak RSS value in bytes as a plain number.
+.SS Verbose Format (-v)
+Shows detailed process tree with individual memory usage for each process,
+including PIDs and process names.
+.SH MEMORY UNITS
+Memory sizes can be specified using the following units:
+.RS
+.IP \(bu 2
+K, KB: Kilobytes (1024 bytes)
+.IP \(bu 2
+M, MB: Megabytes (1024² bytes)
+.IP \(bu 2
+G, GB: Gigabytes (1024³ bytes)
+.IP \(bu 2
+No suffix: bytes
+.RE
+.SH EXIT STATUS
+.B peak-mem
+exits with the same status code as the monitored command. If the monitored
+command is terminated by a signal, peak-mem exits with status 128 + signal number.
+.SH PLATFORM SUPPORT
+.IP "Linux" 12
+Full support via /proc filesystem
+.IP "macOS" 12
+Full support via proc_pidinfo
+.IP "FreeBSD" 12
+Not currently implemented
+.IP "Windows" 12
+Not currently implemented
+.SH LIMITATIONS
+.IP \(bu 2
+Memory sampling occurs at intervals (default 100ms), so very brief spikes
+might be missed. Decrease the interval for more accurate peak detection.
+.IP \(bu 2
+On some systems, tracking child processes requires appropriate permissions.
+.IP \(bu 2
+Timeline files can grow large for long-running processes with small intervals.
+.SH ENVIRONMENT
+.B peak-mem
+forwards all environment variables to the monitored process without modification.
+.SH SIGNALS
+.B peak-mem
+forwards most signals to the monitored process, allowing for proper cleanup
+and termination handling.
+.SH FILES
+.TP
+.I /proc/[pid]/status
+On Linux, used to read memory information.
+.TP
+.I /proc/[pid]/task/
+On Linux, used to track all threads of a process.
+.SH SEE ALSO
+.BR time (1),
+.BR ps (1),
+.BR top (1),
+.BR htop (1),
+.BR pmap (1)
+.SH BUGS
+Report bugs at: ~charmitro/peak-mem-devel@lists.sr.ht
+.SH AUTHOR
+Written by the peak-mem contributors.
+.SH COPYRIGHT
+Copyright © 2025 peak-mem contributors. License: MIT or Apache-2.0.

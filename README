@@ -39,6 +39,17 @@ BUILDING
 
     cargo build --release
 
+INSTALLING MANPAGE
+
+    System-wide installation:
+    sudo install -Dm644 man/man1/peak-mem.1 /usr/share/man/man1/peak-mem.1
+
+    Local installation:
+    install -Dm644 man/man1/peak-mem.1 ~/.local/share/man/man1/peak-mem.1
+
+    View the manpage:
+    man peak-mem
+
 PLATFORM SUPPORT
 
     Linux    - Implemented via /proc
