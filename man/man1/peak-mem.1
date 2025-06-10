@@ -53,6 +53,28 @@ includes timestamps and memory values for later analysis.
 .BR \-\-interval " " \fIMS\fR
 Set the sampling interval in milliseconds (default: 100). Lower values
 provide more accurate peak detection but increase overhead.
+.SS Baseline Management Options
+.TP
+.BR \-\-save\-baseline " " \fINAME\fR
+Save the current run's memory usage as a baseline with the given name.
+Baselines are stored for future comparison to detect memory regressions.
+.TP
+.BR \-\-compare\-baseline " " \fINAME\fR
+Compare the current run against a previously saved baseline. Reports
+memory usage changes and indicates if a regression is detected.
+.TP
+.BR \-\-regression\-threshold " " \fIPERCENT\fR
+Set the percentage increase in RSS that constitutes a regression
+(default: 10.0). Only used with \-\-compare\-baseline.
+.TP
+.BR \-\-baseline\-dir " " \fIDIR\fR
+Directory to store baseline files (default: ~/.cache/peak-mem/baselines).
+.TP
+.B \-\-list\-baselines
+List all saved baselines and exit.
+.TP
+.BR \-\-delete\-baseline " " \fINAME\fR
+Delete a saved baseline and exit.
 .SS Standard Options
 .TP
 .BR \-h ", " \-\-help
@@ -103,6 +125,32 @@ Verbose output with threshold and timeline:
 .RS
 .B peak-mem -v --threshold 2G --timeline mem.json -- make -j8
 .RE
+.SS Memory Regression Detection
+Save a baseline for your application:
+.PP
+.RS
+.B peak-mem --save-baseline v1.0 -- ./myapp
+.RE
+.PP
+Compare against the baseline after changes:
+.PP
+.RS
+.B peak-mem --compare-baseline v1.0 -- ./myapp
+.RE
+.PP
+Use stricter regression threshold (5%):
+.PP
+.RS
+.B peak-mem --compare-baseline v1.0 --regression-threshold 5 -- ./myapp
+.RE
+.PP
+List and manage baselines:
+.PP
+.RS
+.B peak-mem --list-baselines
+.br
+.B peak-mem --delete-baseline v1.0
+.RE
 .SH OUTPUT FORMATS
 .SS Human-readable (default)
 Shows peak RSS and VSZ in human-readable units (KB, MB, GB) along with
@@ -149,8 +197,17 @@ No suffix: bytes
 .RE
 .SH EXIT STATUS
 .B peak-mem
-exits with the same status code as the monitored command. If the monitored
-command is terminated by a signal, peak-mem exits with status 128 + signal number.
+normally exits with the same status code as the monitored command. 
+If the monitored command is terminated by a signal, peak-mem exits 
+with status 128 + signal number.
+.PP
+Special exit codes:
+.RS
+.IP "1" 8
+Memory threshold exceeded (when using --threshold)
+.IP "1" 8
+Memory regression detected (when using --compare-baseline)
+.RE
 .SH PLATFORM SUPPORT
 .IP "Linux" 12
 Full support via /proc filesystem

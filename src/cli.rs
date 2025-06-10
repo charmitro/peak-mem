@@ -17,7 +17,7 @@ pub struct Cli {
         trailing_var_arg = true,
         value_name = "COMMAND",
         help = "Command to execute and monitor",
-        required = true
+        required_unless_present_any = &["list_baselines", "delete_baseline"]
     )]
     pub command: Vec<String>,
 
@@ -91,6 +91,52 @@ pub struct Cli {
         help = "Sampling interval in milliseconds"
     )]
     pub interval: u64,
+
+    #[arg(
+        long = "save-baseline",
+        value_name = "NAME",
+        help = "Save the result as a baseline with the given name",
+        conflicts_with = "compare_baseline"
+    )]
+    pub save_baseline: Option<String>,
+
+    #[arg(
+        long = "compare-baseline",
+        value_name = "NAME",
+        help = "Compare results against a saved baseline",
+        conflicts_with = "save_baseline"
+    )]
+    pub compare_baseline: Option<String>,
+
+    #[arg(
+        long = "regression-threshold",
+        value_name = "PERCENT",
+        default_value = "10.0",
+        help = "Memory increase percentage to consider as regression"
+    )]
+    pub regression_threshold: f64,
+
+    #[arg(
+        long = "baseline-dir",
+        value_name = "DIR",
+        help = "Directory to store baselines (default: ~/.cache/peak-mem/baselines)"
+    )]
+    pub baseline_dir: Option<PathBuf>,
+
+    #[arg(
+        long = "list-baselines",
+        help = "List all saved baselines and exit",
+        conflicts_with_all = &["command", "save_baseline", "compare_baseline"]
+    )]
+    pub list_baselines: bool,
+
+    #[arg(
+        long = "delete-baseline",
+        value_name = "NAME",
+        help = "Delete a saved baseline and exit",
+        conflicts_with_all = &["command", "save_baseline", "compare_baseline", "list_baselines"]
+    )]
+    pub delete_baseline: Option<String>,
 }
 
 fn parse_threshold(s: &str) -> Result<ByteSize> {

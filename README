@@ -24,6 +24,14 @@ OPTIONS
     --timeline FILE         Record timeline
     --interval MS           Sampling interval (default: 100)
 
+    Memory Regression Detection:
+    --save-baseline NAME    Save current run as baseline
+    --compare-baseline NAME Compare against saved baseline
+    --regression-threshold % Memory increase threshold (default: 10%)
+    --baseline-dir DIR      Baseline storage directory
+    --list-baselines        List all saved baselines
+    --delete-baseline NAME  Delete a saved baseline
+
 EXAMPLES
 
     Basic usage:
@@ -34,6 +42,20 @@ EXAMPLES
 
     Set 1GB threshold:
     peak-mem --threshold 1G -- ./test
+
+    Memory regression detection:
+    # Save a baseline
+    peak-mem --save-baseline v1.0 -- ./myapp
+
+    # Compare against baseline
+    peak-mem --compare-baseline v1.0 -- ./myapp
+
+    # Use stricter threshold (5% increase = regression)
+    peak-mem --compare-baseline v1.0 --regression-threshold 5 -- ./myapp
+
+    # List and manage baselines
+    peak-mem --list-baselines
+    peak-mem --delete-baseline v1.0
 
 BUILDING
 
@@ -49,6 +71,22 @@ INSTALLING MANPAGE
 
     View the manpage:
     man peak-mem
+
+MEMORY REGRESSION DETECTION
+
+    Peak-mem can save memory usage baselines and compare subsequent runs
+    to detect memory regressions. This is useful for:
+
+    - CI/CD pipelines to catch memory regressions
+    - Comparing memory usage before/after optimizations
+    - Tracking memory usage across releases
+
+    Baselines are stored in ~/.cache/peak-mem/baselines/ by default.
+    When comparing, peak-mem will:
+
+    1. Report percentage changes in RSS, VSZ, and duration
+    2. Exit with code 1 if RSS increases exceed the threshold
+    3. Support multiple output formats (human, JSON, CSV, quiet)
 
 PLATFORM SUPPORT
 

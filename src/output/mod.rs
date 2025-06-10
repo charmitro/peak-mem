@@ -1,3 +1,4 @@
+use crate::baseline::ComparisonResult;
 use crate::cli::OutputFormat;
 use crate::types::{MonitorResult, ProcessMemoryInfo};
 use anyhow::Result;
@@ -221,6 +222,135 @@ impl OutputFormatter {
             Self::print_process_tree(stdout, child, &child_prefix, is_last_child)?;
         }
 
+        Ok(())
+    }
+
+    pub fn format_comparison(comparison: &ComparisonResult, format: OutputFormat) -> Result<()> {
+        match format {
+            OutputFormat::Human => Self::format_comparison_human(comparison),
+            OutputFormat::Json => Self::format_comparison_json(comparison),
+            OutputFormat::Csv => Self::format_comparison_csv(comparison),
+            OutputFormat::Quiet => Self::format_comparison_quiet(comparison),
+        }
+    }
+
+    fn format_comparison_human(comparison: &ComparisonResult) -> Result<()> {
+        let mut stdout = io::stdout();
+
+        writeln!(stdout, "Command: {}", comparison.current.command)?;
+        writeln!(stdout)?;
+
+        writeln!(stdout, "Baseline vs Current:")?;
+        writeln!(
+            stdout,
+            "  Peak RSS: {} → {} ({:+.1}%)",
+            ByteSize::b(comparison.baseline.peak_rss_bytes),
+            comparison.current.peak_rss(),
+            comparison.rss_diff_percent
+        )?;
+
+        if comparison.rss_diff_bytes > 0 {
+            writeln!(
+                stdout,
+                "  Absolute increase: {}",
+                ByteSize::b(comparison.rss_diff_bytes as u64)
+            )?;
+        } else if comparison.rss_diff_bytes < 0 {
+            writeln!(
+                stdout,
+                "  Absolute decrease: {}",
+                ByteSize::b((-comparison.rss_diff_bytes) as u64)
+            )?;
+        }
+
+        writeln!(stdout)?;
+        writeln!(
+            stdout,
+            "  Peak VSZ: {} → {} ({:+.1}%)",
+            ByteSize::b(comparison.baseline.peak_vsz_bytes),
+            comparison.current.peak_vsz(),
+            comparison.vsz_diff_percent
+        )?;
+
+        writeln!(stdout)?;
+        writeln!(
+            stdout,
+            "  Duration: {:.1}s → {:.1}s ({:+.1}%)",
+            comparison.baseline.duration_ms as f64 / 1000.0,
+            comparison.current.duration().as_secs_f64(),
+            comparison.duration_diff_percent
+        )?;
+
+        writeln!(stdout)?;
+        if comparison.regression_detected {
+            writeln!(
+                stdout,
+                "❌ REGRESSION DETECTED: Memory usage increased by {:.1}%",
+                comparison.rss_diff_percent
+            )?;
+        } else {
+            writeln!(stdout, "✅ No regression detected")?;
+        }
+
+        stdout.flush()?;
+        Ok(())
+    }
+
+    fn format_comparison_json(comparison: &ComparisonResult) -> Result<()> {
+        let json = serde_json::to_string_pretty(comparison)?;
+        println!("{}", json);
+        Ok(())
+    }
+
+    fn format_comparison_csv(comparison: &ComparisonResult) -> Result<()> {
+        let mut wtr = csv::Writer::from_writer(io::stdout());
+
+        wtr.write_record([
+            "baseline_command",
+            "baseline_rss_bytes",
+            "baseline_vsz_bytes",
+            "baseline_duration_ms",
+            "current_command",
+            "current_rss_bytes",
+            "current_vsz_bytes",
+            "current_duration_ms",
+            "rss_diff_bytes",
+            "rss_diff_percent",
+            "vsz_diff_bytes",
+            "vsz_diff_percent",
+            "duration_diff_ms",
+            "duration_diff_percent",
+            "regression_detected",
+        ])?;
+
+        wtr.write_record([
+            &comparison.baseline.command,
+            &comparison.baseline.peak_rss_bytes.to_string(),
+            &comparison.baseline.peak_vsz_bytes.to_string(),
+            &comparison.baseline.duration_ms.to_string(),
+            &comparison.current.command,
+            &comparison.current.peak_rss_bytes.to_string(),
+            &comparison.current.peak_vsz_bytes.to_string(),
+            &comparison.current.duration_ms.to_string(),
+            &comparison.rss_diff_bytes.to_string(),
+            &comparison.rss_diff_percent.to_string(),
+            &comparison.vsz_diff_bytes.to_string(),
+            &comparison.vsz_diff_percent.to_string(),
+            &comparison.duration_diff_ms.to_string(),
+            &comparison.duration_diff_percent.to_string(),
+            &comparison.regression_detected.to_string(),
+        ])?;
+
+        wtr.flush()?;
+        Ok(())
+    }
+
+    fn format_comparison_quiet(comparison: &ComparisonResult) -> Result<()> {
+        if comparison.regression_detected {
+            println!("regression");
+        } else {
+            println!("ok");
+        }
         Ok(())
     }
 }

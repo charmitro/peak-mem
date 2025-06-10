@@ -1,3 +1,4 @@
+mod baseline;
 mod cli;
 mod monitor;
 mod output;
@@ -5,6 +6,7 @@ mod process;
 mod types;
 
 use anyhow::Result;
+use baseline::BaselineManager;
 use bytesize::ByteSize;
 use clap::Parser;
 use monitor::tracker::MemoryTracker;
@@ -15,6 +17,32 @@ use tokio::time;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
+
+    // Handle baseline operations that don't require running a command
+    let baseline_dir = args
+        .baseline_dir
+        .clone()
+        .unwrap_or_else(BaselineManager::default_dir);
+    let baseline_manager = BaselineManager::new(baseline_dir)?;
+
+    if args.list_baselines {
+        let baselines = baseline_manager.list_baselines()?;
+        if baselines.is_empty() {
+            println!("No baselines found.");
+        } else {
+            println!("Saved baselines:");
+            for name in baselines {
+                println!("  {}", name);
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(name) = &args.delete_baseline {
+        baseline_manager.delete_baseline(name)?;
+        println!("Baseline '{}' deleted.", name);
+        return Ok(());
+    }
 
     let runner = process::ProcessRunner::new(args.command.clone())?;
     let command_string = runner.command_string();
@@ -104,8 +132,25 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Format output
-    OutputFormatter::format(&result, args.output_format(), args.verbose)?;
+    // Handle baseline operations
+    if let Some(baseline_name) = &args.save_baseline {
+        let path = baseline_manager.save_baseline(baseline_name, &result)?;
+        eprintln!("Baseline '{}' saved to: {}", baseline_name, path.display());
+    }
+
+    if let Some(baseline_name) = &args.compare_baseline {
+        let comparison =
+            baseline_manager.compare(baseline_name, &result, args.regression_threshold)?;
+        OutputFormatter::format_comparison(&comparison, args.output_format())?;
+
+        // Exit with error if regression detected
+        if comparison.regression_detected {
+            std::process::exit(1);
+        }
+    } else {
+        // Format output normally if not comparing
+        OutputFormatter::format(&result, args.output_format(), args.verbose)?;
+    }
 
     // Exit with appropriate code
     if threshold_exceeded {
