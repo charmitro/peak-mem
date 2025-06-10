@@ -239,7 +239,7 @@ mod tests {
         // Spawn a shell with sleep children
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg("sleep 0.2 & sleep 0.2 & wait")
+            .arg("sleep 1 & sleep 1 & wait")
             .spawn()
             .expect("Failed to spawn test process");
 
