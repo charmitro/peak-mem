@@ -251,7 +251,7 @@ mod tests {
         let handle = tracker.start(10).await;
 
         // Let it run to capture children
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Check we captured a tree with children
         let tree_result = tracker.get_process_tree().await;
