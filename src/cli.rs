@@ -88,7 +88,8 @@ pub struct Cli {
         long = "interval",
         value_name = "MS",
         default_value = "100",
-        help = "Sampling interval in milliseconds"
+        help = "Sampling interval in milliseconds",
+        value_parser = parse_interval
     )]
     pub interval: u64,
 
@@ -142,6 +143,14 @@ pub struct Cli {
 fn parse_threshold(s: &str) -> Result<ByteSize> {
     s.parse::<ByteSize>()
         .map_err(|_| anyhow::anyhow!("Invalid threshold format. Use formats like: 512M, 1G, 1.5GB"))
+}
+
+fn parse_interval(s: &str) -> Result<u64> {
+    let interval: u64 = s.parse()?;
+    if interval == 0 {
+        anyhow::bail!("Interval must be greater than zero");
+    }
+    Ok(interval)
 }
 
 impl Cli {
