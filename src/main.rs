@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
         } else {
             println!("Saved baselines:");
             for name in baselines {
-                println!("  {}", name);
+                println!("  {name}");
             }
         }
         return Ok(());
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 
     if let Some(name) = &args.delete_baseline {
         baseline_manager.delete_baseline(name)?;
-        println!("Baseline '{}' deleted.", name);
+        println!("Baseline '{name}' deleted.");
         return Ok(());
     }
 
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
         match tracker.get_process_tree().await {
             Ok(tree) => Some(tree),
             Err(e) => {
-                eprintln!("Warning: Failed to get process tree: {}", e);
+                eprintln!("Warning: Failed to get process tree: {e}");
                 None
             }
         }

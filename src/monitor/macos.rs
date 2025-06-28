@@ -29,8 +29,7 @@ impl MacOSMonitor {
 
         if ret <= 0 {
             return Err(PeakMemError::PermissionDenied(format!(
-                "Cannot access process {} memory info",
-                pid
+                "Cannot access process {pid} memory info"
             )));
         }
 
@@ -196,7 +195,7 @@ fn get_process_name(pid: u32) -> Result<String> {
     };
 
     if ret <= 0 {
-        return Ok(format!("pid:{}", pid));
+        return Ok(format!("pid:{pid}"));
     }
 
     // Extract just the filename from the path
@@ -209,7 +208,7 @@ fn get_process_name(pid: u32) -> Result<String> {
     Ok(path
         .split('/')
         .next_back()
-        .unwrap_or(&format!("pid:{}", pid))
+        .unwrap_or(&format!("pid:{pid}"))
         .to_string())
 }
 

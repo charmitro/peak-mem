@@ -128,7 +128,7 @@ impl BaselineManager {
 
         let json = fs::read_to_string(&path)?;
         let baseline: Baseline = serde_json::from_str(&json)
-            .map_err(|e| PeakMemError::Parse(format!("Failed to parse baseline: {}", e)))?;
+            .map_err(|e| PeakMemError::Parse(format!("Failed to parse baseline: {e}")))?;
 
         Ok(baseline)
     }

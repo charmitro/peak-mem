@@ -268,8 +268,7 @@ mod tests {
         // Some CI environments may have different process visibility
         assert!(
             !tree.children.is_empty(),
-            "Expected at least 1 child process, got 0. Process tree: {:?}",
-            tree
+            "Expected at least 1 child process, got 0. Process tree: {tree:?}"
         );
 
         tracker.stop();

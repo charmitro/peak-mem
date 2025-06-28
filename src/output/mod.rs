@@ -31,7 +31,7 @@ impl OutputFormatter {
         writeln!(stdout, " / {} (VSZ)", result.peak_vsz())?;
 
         if let Some(exit_code) = result.exit_code {
-            writeln!(stdout, "Exit code: {}", exit_code)?;
+            writeln!(stdout, "Exit code: {exit_code}")?;
         }
 
         writeln!(stdout, "Duration: {:.1}s", result.duration().as_secs_f64())?;
@@ -46,7 +46,7 @@ impl OutputFormatter {
 
     fn format_json(result: &MonitorResult) -> Result<()> {
         let json = serde_json::to_string_pretty(result)?;
-        println!("{}", json);
+        println!("{json}");
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl OutputFormatter {
             )?;
         }
         if let Some(pid) = result.main_pid {
-            writeln!(stdout, "Process ID: {}", pid)?;
+            writeln!(stdout, "Process ID: {pid}")?;
         }
         writeln!(stdout)?;
 
@@ -120,8 +120,7 @@ impl OutputFormatter {
             let process_count = Self::count_processes(tree);
             writeln!(
                 stdout,
-                "Process Tree: ({} processes monitored)",
-                process_count
+                "Process Tree: ({process_count} processes monitored)"
             )?;
             Self::print_process_tree(&mut stdout, tree, "", true)?;
         } else {
@@ -140,7 +139,7 @@ impl OutputFormatter {
             result.duration().as_secs_f64()
         )?;
         if let Some(sample_count) = result.sample_count {
-            writeln!(stdout, "  Samples collected: {}", sample_count)?;
+            writeln!(stdout, "  Samples collected: {sample_count}")?;
         }
         writeln!(
             stdout,
@@ -298,7 +297,7 @@ impl OutputFormatter {
 
     fn format_comparison_json(comparison: &ComparisonResult) -> Result<()> {
         let json = serde_json::to_string_pretty(comparison)?;
-        println!("{}", json);
+        println!("{json}");
         Ok(())
     }
 
@@ -381,16 +380,8 @@ impl RealtimeDisplay {
         }
 
         // Print new status
-        writeln!(
-            stdout,
-            "Current RSS: {} | Peak RSS: {}",
-            current_rss, peak_rss
-        )?;
-        writeln!(
-            stdout,
-            "Current VSZ: {} | Peak VSZ: {}",
-            current_vsz, peak_vsz
-        )?;
+        writeln!(stdout, "Current RSS: {current_rss} | Peak RSS: {peak_rss}")?;
+        writeln!(stdout, "Current VSZ: {current_vsz} | Peak VSZ: {peak_vsz}")?;
         stdout.flush()?;
 
         self.last_line_count = 2;

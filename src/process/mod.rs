@@ -27,9 +27,9 @@ impl ProcessRunner {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
 
-        let child = cmd.spawn().map_err(|e| {
-            PeakMemError::ProcessSpawn(format!("Failed to spawn '{}': {}", program, e))
-        })?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| PeakMemError::ProcessSpawn(format!("Failed to spawn '{program}': {e}")))?;
 
         let pid = child
             .id()
