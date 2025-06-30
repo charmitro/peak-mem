@@ -7,7 +7,7 @@ description = "Lightweight memory usage monitor for any process"
 repository = "https://git.sr.ht/~charmitro/peak-mem"
 license = "MIT"
 keywords = ["memory", "monitor", "profiling", "system", "performance"]
-categories = ["command-line-utilities", "development-tools", "profiling"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.98"
