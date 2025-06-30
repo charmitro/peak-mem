@@ -14,16 +14,16 @@ impl LinuxMonitor {
     fn read_proc_status(&self, pid: u32) -> Result<(u64, u64)> {
         let process = Process::new(pid as i32).map_err(|e| match e {
             procfs::ProcError::NotFound(_) => {
-                PeakMemError::ProcessSpawn(format!("Process {} not found", pid))
+                PeakMemError::ProcessSpawn(format!("Process {pid} not found"))
             }
             procfs::ProcError::PermissionDenied(_) => {
-                PeakMemError::PermissionDenied(format!("Cannot access process {}", pid))
+                PeakMemError::PermissionDenied(format!("Cannot access process {pid}"))
             }
-            _ => PeakMemError::ProcessSpawn(format!("Failed to access process {}: {}", pid, e)),
+            _ => PeakMemError::ProcessSpawn(format!("Failed to access process {pid}: {e}")),
         })?;
 
         let status = process.status().map_err(|e| {
-            PeakMemError::ProcessSpawn(format!("Failed to read process {} status: {}", pid, e))
+            PeakMemError::ProcessSpawn(format!("Failed to read process {pid} status: {e}"))
         })?;
 
         let rss_bytes = status.vmrss.unwrap_or(0) * 1024;
@@ -36,7 +36,7 @@ impl LinuxMonitor {
         Process::new(pid as i32)
             .and_then(|p| p.stat())
             .map(|stat| stat.comm)
-            .unwrap_or_else(|_| format!("pid:{}", pid))
+            .unwrap_or_else(|_| format!("pid:{pid}"))
     }
 }
 
