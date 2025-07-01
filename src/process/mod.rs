@@ -1,12 +1,25 @@
+//! Process spawning and management.
+//!
+//! This module handles spawning the target process and managing its lifecycle,
+//! including signal forwarding on Unix systems.
+
 use crate::types::{PeakMemError, Result};
 use std::process::Stdio;
 use tokio::process::Command;
 
+/// Handles spawning and running the target process.
 pub struct ProcessRunner {
     command: Vec<String>,
 }
 
 impl ProcessRunner {
+    /// Creates a new process runner with the given command.
+    ///
+    /// # Arguments
+    /// * `command` - Command and arguments to execute
+    ///
+    /// # Errors
+    /// * Returns error if command is empty
     pub fn new(command: Vec<String>) -> Result<Self> {
         if command.is_empty() {
             return Err(PeakMemError::ProcessSpawn(
@@ -17,6 +30,12 @@ impl ProcessRunner {
         Ok(Self { command })
     }
 
+    /// Spawns the configured process.
+    ///
+    /// The process inherits stdin, stdout, and stderr from the parent.
+    ///
+    /// # Returns
+    /// * `ProcessHandle` for managing the spawned process
     pub async fn spawn(&self) -> Result<ProcessHandle> {
         let program = &self.command[0];
         let args = &self.command[1..];
@@ -38,21 +57,32 @@ impl ProcessRunner {
         Ok(ProcessHandle { child, pid })
     }
 
+    /// Returns the command as a single string for display.
     pub fn command_string(&self) -> String {
         self.command.join(" ")
     }
 }
 
+/// Handle to a spawned process.
+///
+/// Provides methods for waiting on the process and forwarding signals.
 pub struct ProcessHandle {
     child: tokio::process::Child,
     pid: u32,
 }
 
 impl ProcessHandle {
+    /// Returns the process ID.
     pub fn pid(&self) -> u32 {
         self.pid
     }
 
+    /// Waits for the process to complete while forwarding signals on Unix.
+    ///
+    /// Forwards SIGINT and SIGTERM to the child process.
+    ///
+    /// # Returns
+    /// * Exit code of the process
     #[cfg(unix)]
     pub async fn wait_with_signal_forwarding(mut self) -> Result<Option<i32>> {
         use nix::sys::signal::{self, Signal};
@@ -90,6 +120,13 @@ impl ProcessHandle {
         }
     }
 
+    /// Waits for the process to complete on Windows.
+    ///
+    /// On Windows, Ctrl+C is automatically forwarded to child processes
+    /// in the same console.
+    ///
+    /// # Returns
+    /// * Exit code of the process
     #[cfg(windows)]
     pub async fn wait_with_signal_forwarding(mut self) -> Result<Option<i32>> {
         // On Windows, Ctrl+C is automatically forwarded to child processes

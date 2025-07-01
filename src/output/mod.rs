@@ -1,3 +1,8 @@
+//! Output formatting for memory monitoring results.
+//!
+//! This module provides formatters for different output formats including
+//! human-readable, JSON, CSV, and quiet modes.
+
 use crate::baseline::ComparisonResult;
 use crate::cli::OutputFormat;
 use crate::types::{MonitorResult, ProcessMemoryInfo};
@@ -5,9 +10,16 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use std::io::{self, Write};
 
+/// Handles formatting of monitoring results for different output formats.
 pub struct OutputFormatter;
 
 impl OutputFormatter {
+    /// Formats monitoring results according to the specified format.
+    ///
+    /// # Arguments
+    /// * `result` - The monitoring results to format
+    /// * `format` - The output format to use
+    /// * `verbose` - Whether to include verbose information
     pub fn format(result: &MonitorResult, format: OutputFormat, verbose: bool) -> Result<()> {
         match format {
             OutputFormat::Human => {
@@ -224,6 +236,11 @@ impl OutputFormatter {
         Ok(())
     }
 
+    /// Formats baseline comparison results.
+    ///
+    /// # Arguments
+    /// * `comparison` - The comparison results
+    /// * `format` - The output format to use
     pub fn format_comparison(comparison: &ComparisonResult, format: OutputFormat) -> Result<()> {
         match format {
             OutputFormat::Human => Self::format_comparison_human(comparison),
@@ -354,15 +371,28 @@ impl OutputFormatter {
     }
 }
 
+/// Handles real-time display of memory usage in watch mode.
+///
+/// Uses terminal control sequences to update the display in-place.
 pub struct RealtimeDisplay {
     last_line_count: usize,
 }
 
 impl RealtimeDisplay {
+    /// Creates a new real-time display handler.
     pub fn new() -> Self {
         Self { last_line_count: 0 }
     }
 
+    /// Updates the display with current memory values.
+    ///
+    /// Clears previous lines and writes new values in-place.
+    ///
+    /// # Arguments
+    /// * `current_rss` - Current RSS value
+    /// * `peak_rss` - Peak RSS value observed
+    /// * `current_vsz` - Current VSZ value
+    /// * `peak_vsz` - Peak VSZ value observed
     pub fn update(
         &mut self,
         current_rss: ByteSize,
@@ -388,6 +418,9 @@ impl RealtimeDisplay {
         Ok(())
     }
 
+    /// Clears the real-time display.
+    ///
+    /// Removes all lines written by the display.
     pub fn clear(&mut self) -> Result<()> {
         use crossterm::{cursor, terminal, ExecutableCommand};
         let mut stdout = io::stdout();

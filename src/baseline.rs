@@ -1,3 +1,8 @@
+//! Baseline comparison functionality for detecting memory usage regressions.
+//!
+//! This module provides functionality to save memory usage snapshots as
+//! baselines and compare new measurements against them to detect regressions.
+
 use crate::types::{MonitorResult, PeakMemError, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -5,14 +10,25 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// Represents a saved baseline measurement for comparison.
+///
+/// Baselines capture key metrics from a monitoring session along with
+/// metadata about the environment where the measurement was taken.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Baseline {
+    /// Version of peak-mem that created this baseline.
     pub version: String,
+    /// When this baseline was created.
     pub created_at: DateTime<Utc>,
+    /// Command that was monitored.
     pub command: String,
+    /// Peak RSS value in bytes.
     pub peak_rss_bytes: u64,
+    /// Peak VSZ value in bytes.
     pub peak_vsz_bytes: u64,
+    /// Duration of execution in milliseconds.
     pub duration_ms: u64,
+    /// Additional metadata (platform, architecture, etc.).
     pub metadata: HashMap<String, String>,
 }
 
@@ -38,20 +54,40 @@ impl From<&MonitorResult> for Baseline {
     }
 }
 
+/// Result of comparing current measurements against a baseline.
+///
+/// Contains detailed information about differences in memory usage
+/// and whether a regression was detected based on the threshold.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonResult {
+    /// The baseline being compared against.
     pub baseline: Baseline,
+    /// Current measurement results.
     pub current: MonitorResult,
+    /// Difference in RSS bytes (positive means increase).
     pub rss_diff_bytes: i64,
+    /// Percentage change in RSS.
     pub rss_diff_percent: f64,
+    /// Difference in VSZ bytes (positive means increase).
     pub vsz_diff_bytes: i64,
+    /// Percentage change in VSZ.
     pub vsz_diff_percent: f64,
+    /// Difference in duration milliseconds.
     pub duration_diff_ms: i64,
+    /// Percentage change in duration.
     pub duration_diff_percent: f64,
+    /// Whether memory usage exceeded the regression threshold.
     pub regression_detected: bool,
 }
 
 impl ComparisonResult {
+    /// Creates a new comparison result.
+    ///
+    /// # Arguments
+    /// * `baseline` - The baseline to compare against
+    /// * `current` - Current measurement results
+    /// * `threshold_percent` - Percentage increase that triggers regression
+    ///   detection
     pub fn new(baseline: Baseline, current: MonitorResult, threshold_percent: f64) -> Self {
         let rss_diff_bytes = current.peak_rss_bytes as i64 - baseline.peak_rss_bytes as i64;
         let rss_diff_percent = if baseline.peak_rss_bytes > 0 {
@@ -90,11 +126,22 @@ impl ComparisonResult {
     }
 }
 
+/// Manages baseline storage and retrieval.
+///
+/// Handles saving baselines to disk, loading them for comparison,
+/// and managing the baseline directory.
 pub struct BaselineManager {
     baselines_dir: PathBuf,
 }
 
 impl BaselineManager {
+    /// Creates a new baseline manager with a specific directory.
+    ///
+    /// # Arguments
+    /// * `baselines_dir` - Directory to store baseline files
+    ///
+    /// # Errors
+    /// * Returns error if directory creation fails
     pub fn new(baselines_dir: PathBuf) -> Result<Self> {
         if !baselines_dir.exists() {
             fs::create_dir_all(&baselines_dir)?;
@@ -102,6 +149,10 @@ impl BaselineManager {
         Ok(Self { baselines_dir })
     }
 
+    /// Returns the default baseline directory path.
+    ///
+    /// Uses the system cache directory if available, otherwise
+    /// falls back to a local directory.
     pub fn default_dir() -> PathBuf {
         if let Some(cache_dir) = dirs::cache_dir() {
             cache_dir.join("peak-mem").join("baselines")
@@ -110,6 +161,14 @@ impl BaselineManager {
         }
     }
 
+    /// Saves a monitoring result as a baseline.
+    ///
+    /// # Arguments
+    /// * `name` - Name for the baseline (will be sanitized)
+    /// * `result` - Monitoring results to save
+    ///
+    /// # Returns
+    /// * Path to the saved baseline file
     pub fn save_baseline(&self, name: &str, result: &MonitorResult) -> Result<PathBuf> {
         let baseline = Baseline::from(result);
         let filename = format!("{}.json", sanitize_filename(name));
@@ -165,6 +224,8 @@ impl BaselineManager {
         threshold_percent: f64,
     ) -> Result<ComparisonResult> {
         let baseline = self.load_baseline(baseline_name)?;
+        // Clone is necessary here because ComparisonResult needs to own the
+        // MonitorResult for serialization and output formatting purposes
         Ok(ComparisonResult::new(
             baseline,
             current.clone(),
