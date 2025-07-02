@@ -4,7 +4,11 @@ Monitor peak memory usage of processes.
 
 INSTALLATION
 
+    Install from a local path:
     cargo install --path .
+
+    Or install directly from https://crates.io/crates/peak-mem:
+    cargo install peak-mem
 
 USAGE
 
