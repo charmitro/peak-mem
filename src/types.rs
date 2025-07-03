@@ -166,8 +166,8 @@ mod tests {
             main_pid: None,
         };
 
-        assert_eq!(result.peak_rss().to_string(), "100.0 MiB");
-        assert_eq!(result.peak_vsz().to_string(), "200.0 MiB");
+        assert_eq!(result.peak_rss().to_string(), "104.9 MB");
+        assert_eq!(result.peak_vsz().to_string(), "209.7 MB");
         assert_eq!(result.duration().as_secs(), 5);
     }
 }

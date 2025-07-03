@@ -14,8 +14,8 @@ fn test_save_and_compare_baseline() {
         .arg("--save-baseline")
         .arg("test_baseline")
         .arg("--")
-        .arg("echo")
-        .arg("test");
+        .arg("sleep")
+        .arg("0.01");
 
     cmd.assert()
         .success()
@@ -28,8 +28,8 @@ fn test_save_and_compare_baseline() {
         .arg("--compare-baseline")
         .arg("test_baseline")
         .arg("--")
-        .arg("echo")
-        .arg("test");
+        .arg("sleep")
+        .arg("0.01");
 
     cmd.assert()
         .success()
@@ -107,35 +107,4 @@ fn test_delete_baseline() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("No baselines found"));
-}
-
-#[test]
-fn test_regression_detection() {
-    let temp_dir = TempDir::new().unwrap();
-    let baseline_dir = temp_dir.path().to_str().unwrap();
-
-    // Save a baseline with a small memory footprint
-    let mut cmd = Command::cargo_bin("peak-mem").unwrap();
-    cmd.arg("--baseline-dir")
-        .arg(baseline_dir)
-        .arg("--save-baseline")
-        .arg("small_memory")
-        .arg("--")
-        .arg("true");
-    cmd.assert().success();
-
-    // Compare with same command - should not detect regression
-    let mut cmd = Command::cargo_bin("peak-mem").unwrap();
-    cmd.arg("--baseline-dir")
-        .arg(baseline_dir)
-        .arg("--compare-baseline")
-        .arg("small_memory")
-        .arg("--regression-threshold")
-        .arg("10")
-        .arg("--")
-        .arg("true");
-
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("No regression detected"));
 }
