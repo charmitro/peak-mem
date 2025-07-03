@@ -1,6 +1,6 @@
 [package]
 name = "peak-mem"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Peak-mem Development Team"]
 description = "Lightweight memory usage monitor for any process"
