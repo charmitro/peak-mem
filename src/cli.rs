@@ -3,6 +3,31 @@ use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryUnit {
+    Bytes,
+    Kilobytes,
+    Megabytes,
+    Gigabytes,
+    Kibibytes,
+    Mebibytes,
+    Gibibytes,
+}
+
+impl MemoryUnit {
+    pub fn format(&self, bytes: u64) -> String {
+        match self {
+            MemoryUnit::Bytes => format!("{bytes} B"),
+            MemoryUnit::Kilobytes => format!("{:.1} KB", bytes as f64 / 1_000.0),
+            MemoryUnit::Megabytes => format!("{:.1} MB", bytes as f64 / 1_000_000.0),
+            MemoryUnit::Gigabytes => format!("{:.1} GB", bytes as f64 / 1_000_000_000.0),
+            MemoryUnit::Kibibytes => format!("{:.1} KiB", bytes as f64 / 1_024.0),
+            MemoryUnit::Mebibytes => format!("{:.1} MiB", bytes as f64 / 1_048_576.0),
+            MemoryUnit::Gibibytes => format!("{:.1} GiB", bytes as f64 / 1_073_741_824.0),
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "peak-mem",
@@ -94,6 +119,14 @@ pub struct Cli {
     pub interval: u64,
 
     #[arg(
+        long = "units",
+        value_name = "UNIT",
+        help = "Force specific memory units (B, KB, MB, GB, KiB, MiB, GiB)",
+        value_parser = parse_units
+    )]
+    pub units: Option<MemoryUnit>,
+
+    #[arg(
         long = "save-baseline",
         value_name = "NAME",
         help = "Save the result as a baseline with the given name",
@@ -151,6 +184,19 @@ fn parse_interval(s: &str) -> Result<u64> {
         anyhow::bail!("Interval must be greater than zero");
     }
     Ok(interval)
+}
+
+fn parse_units(s: &str) -> Result<MemoryUnit> {
+    match s {
+        "B" => Ok(MemoryUnit::Bytes),
+        "KB" => Ok(MemoryUnit::Kilobytes),
+        "MB" => Ok(MemoryUnit::Megabytes),
+        "GB" => Ok(MemoryUnit::Gigabytes),
+        "KiB" => Ok(MemoryUnit::Kibibytes),
+        "MiB" => Ok(MemoryUnit::Mebibytes),
+        "GiB" => Ok(MemoryUnit::Gibibytes),
+        _ => anyhow::bail!("Invalid unit. Use one of: B, KB, MB, GB, KiB, MiB, GiB"),
+    }
 }
 
 impl Cli {

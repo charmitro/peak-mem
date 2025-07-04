@@ -4,7 +4,7 @@
 //! human-readable, JSON, CSV, and quiet modes.
 
 use crate::baseline::ComparisonResult;
-use crate::cli::OutputFormat;
+use crate::cli::{MemoryUnit, OutputFormat};
 use crate::types::{MonitorResult, ProcessMemoryInfo};
 use anyhow::Result;
 use bytesize::ByteSize;
@@ -20,13 +20,19 @@ impl OutputFormatter {
     /// * `result` - The monitoring results to format
     /// * `format` - The output format to use
     /// * `verbose` - Whether to include verbose information
-    pub fn format(result: &MonitorResult, format: OutputFormat, verbose: bool) -> Result<()> {
+    /// * `units` - Optional fixed memory unit to use for display
+    pub fn format(
+        result: &MonitorResult,
+        format: OutputFormat,
+        verbose: bool,
+        units: Option<MemoryUnit>,
+    ) -> Result<()> {
         match format {
             OutputFormat::Human => {
                 if verbose {
-                    Self::format_verbose(result)
+                    Self::format_verbose(result, units)
                 } else {
-                    Self::format_human(result)
+                    Self::format_human(result, units)
                 }
             }
             OutputFormat::Json => Self::format_json(result),
@@ -35,12 +41,22 @@ impl OutputFormatter {
         }
     }
 
-    fn format_human(result: &MonitorResult) -> Result<()> {
+    fn format_human(result: &MonitorResult, units: Option<MemoryUnit>) -> Result<()> {
         let mut stdout = io::stdout();
 
         writeln!(stdout, "Command: {}", result.command)?;
-        write!(stdout, "Peak memory usage: {} (RSS)", result.peak_rss())?;
-        writeln!(stdout, " / {} (VSZ)", result.peak_vsz())?;
+
+        if let Some(unit) = units {
+            write!(
+                stdout,
+                "Peak memory usage: {} (RSS)",
+                unit.format(result.peak_rss_bytes)
+            )?;
+            writeln!(stdout, " / {} (VSZ)", unit.format(result.peak_vsz_bytes))?;
+        } else {
+            write!(stdout, "Peak memory usage: {} (RSS)", result.peak_rss())?;
+            writeln!(stdout, " / {} (VSZ)", result.peak_vsz())?;
+        }
 
         if let Some(exit_code) = result.exit_code {
             writeln!(stdout, "Exit code: {exit_code}")?;
@@ -94,7 +110,7 @@ impl OutputFormatter {
         Ok(())
     }
 
-    fn format_verbose(result: &MonitorResult) -> Result<()> {
+    fn format_verbose(result: &MonitorResult, units: Option<MemoryUnit>) -> Result<()> {
         let mut stdout = io::stdout();
 
         // Header
@@ -113,18 +129,33 @@ impl OutputFormatter {
 
         // Memory Usage Section
         writeln!(stdout, "Memory Usage:")?;
-        writeln!(
-            stdout,
-            "  Peak RSS: {} ({} bytes)",
-            result.peak_rss(),
-            result.peak_rss_bytes
-        )?;
-        writeln!(
-            stdout,
-            "  Peak VSZ: {} ({} bytes)",
-            result.peak_vsz(),
-            result.peak_vsz_bytes
-        )?;
+        if let Some(unit) = units {
+            writeln!(
+                stdout,
+                "  Peak RSS: {} ({} bytes)",
+                unit.format(result.peak_rss_bytes),
+                result.peak_rss_bytes
+            )?;
+            writeln!(
+                stdout,
+                "  Peak VSZ: {} ({} bytes)",
+                unit.format(result.peak_vsz_bytes),
+                result.peak_vsz_bytes
+            )?;
+        } else {
+            writeln!(
+                stdout,
+                "  Peak RSS: {} ({} bytes)",
+                result.peak_rss(),
+                result.peak_rss_bytes
+            )?;
+            writeln!(
+                stdout,
+                "  Peak VSZ: {} ({} bytes)",
+                result.peak_vsz(),
+                result.peak_vsz_bytes
+            )?;
+        }
         writeln!(stdout)?;
 
         // Process Tree Section
@@ -134,7 +165,7 @@ impl OutputFormatter {
                 stdout,
                 "Process Tree: ({process_count} processes monitored)"
             )?;
-            Self::print_process_tree(&mut stdout, tree, "", true)?;
+            Self::print_process_tree(&mut stdout, tree, "", true, units)?;
         } else {
             writeln!(
                 stdout,
@@ -192,6 +223,7 @@ impl OutputFormatter {
         tree: &ProcessMemoryInfo,
         prefix: &str,
         is_last: bool,
+        units: Option<MemoryUnit>,
     ) -> Result<()> {
         // Print current process
         let connector = if is_last { "└── " } else { "├── " };
@@ -201,6 +233,12 @@ impl OutputFormatter {
             tree.name.clone()
         };
 
+        let memory_str = if let Some(unit) = units {
+            unit.format(tree.memory.rss_bytes)
+        } else {
+            ByteSize::b(tree.memory.rss_bytes).to_string()
+        };
+
         writeln!(
             stdout,
             "{}{}{} (PID: {}) - Peak: {}",
@@ -208,7 +246,7 @@ impl OutputFormatter {
             if prefix.is_empty() { "" } else { connector },
             name,
             tree.pid,
-            ByteSize::b(tree.memory.rss_bytes)
+            memory_str
         )?;
 
         // Sort children by peak RSS (descending)
@@ -230,7 +268,7 @@ impl OutputFormatter {
 
         for (i, child) in children.iter().enumerate() {
             let is_last_child = i == children.len() - 1;
-            Self::print_process_tree(stdout, child, &child_prefix, is_last_child)?;
+            Self::print_process_tree(stdout, child, &child_prefix, is_last_child, units)?;
         }
 
         Ok(())
@@ -241,52 +279,96 @@ impl OutputFormatter {
     /// # Arguments
     /// * `comparison` - The comparison results
     /// * `format` - The output format to use
-    pub fn format_comparison(comparison: &ComparisonResult, format: OutputFormat) -> Result<()> {
+    /// * `units` - Optional fixed memory unit to use for display
+    pub fn format_comparison(
+        comparison: &ComparisonResult,
+        format: OutputFormat,
+        units: Option<MemoryUnit>,
+    ) -> Result<()> {
         match format {
-            OutputFormat::Human => Self::format_comparison_human(comparison),
+            OutputFormat::Human => Self::format_comparison_human(comparison, units),
             OutputFormat::Json => Self::format_comparison_json(comparison),
             OutputFormat::Csv => Self::format_comparison_csv(comparison),
             OutputFormat::Quiet => Self::format_comparison_quiet(comparison),
         }
     }
 
-    fn format_comparison_human(comparison: &ComparisonResult) -> Result<()> {
+    fn format_comparison_human(
+        comparison: &ComparisonResult,
+        units: Option<MemoryUnit>,
+    ) -> Result<()> {
         let mut stdout = io::stdout();
 
         writeln!(stdout, "Command: {}", comparison.current.command)?;
         writeln!(stdout)?;
 
         writeln!(stdout, "Baseline vs Current:")?;
-        writeln!(
-            stdout,
-            "  Peak RSS: {} → {} ({:+.1}%)",
-            ByteSize::b(comparison.baseline.peak_rss_bytes),
-            comparison.current.peak_rss(),
-            comparison.rss_diff_percent
-        )?;
-
-        if comparison.rss_diff_bytes > 0 {
+        if let Some(unit) = units {
             writeln!(
                 stdout,
-                "  Absolute increase: {}",
-                ByteSize::b(comparison.rss_diff_bytes as u64)
+                "  Peak RSS: {} → {} ({:+.1}%)",
+                unit.format(comparison.baseline.peak_rss_bytes),
+                unit.format(comparison.current.peak_rss_bytes),
+                comparison.rss_diff_percent
             )?;
-        } else if comparison.rss_diff_bytes < 0 {
+        } else {
             writeln!(
                 stdout,
-                "  Absolute decrease: {}",
-                ByteSize::b((-comparison.rss_diff_bytes) as u64)
+                "  Peak RSS: {} → {} ({:+.1}%)",
+                ByteSize::b(comparison.baseline.peak_rss_bytes),
+                comparison.current.peak_rss(),
+                comparison.rss_diff_percent
             )?;
         }
 
+        if comparison.rss_diff_bytes > 0 {
+            if let Some(unit) = units {
+                writeln!(
+                    stdout,
+                    "  Absolute increase: {}",
+                    unit.format(comparison.rss_diff_bytes as u64)
+                )?;
+            } else {
+                writeln!(
+                    stdout,
+                    "  Absolute increase: {}",
+                    ByteSize::b(comparison.rss_diff_bytes as u64)
+                )?;
+            }
+        } else if comparison.rss_diff_bytes < 0 {
+            if let Some(unit) = units {
+                writeln!(
+                    stdout,
+                    "  Absolute decrease: {}",
+                    unit.format((-comparison.rss_diff_bytes) as u64)
+                )?;
+            } else {
+                writeln!(
+                    stdout,
+                    "  Absolute decrease: {}",
+                    ByteSize::b((-comparison.rss_diff_bytes) as u64)
+                )?;
+            }
+        }
+
         writeln!(stdout)?;
-        writeln!(
-            stdout,
-            "  Peak VSZ: {} → {} ({:+.1}%)",
-            ByteSize::b(comparison.baseline.peak_vsz_bytes),
-            comparison.current.peak_vsz(),
-            comparison.vsz_diff_percent
-        )?;
+        if let Some(unit) = units {
+            writeln!(
+                stdout,
+                "  Peak VSZ: {} → {} ({:+.1}%)",
+                unit.format(comparison.baseline.peak_vsz_bytes),
+                unit.format(comparison.current.peak_vsz_bytes),
+                comparison.vsz_diff_percent
+            )?;
+        } else {
+            writeln!(
+                stdout,
+                "  Peak VSZ: {} → {} ({:+.1}%)",
+                ByteSize::b(comparison.baseline.peak_vsz_bytes),
+                comparison.current.peak_vsz(),
+                comparison.vsz_diff_percent
+            )?;
+        }
 
         writeln!(stdout)?;
         writeln!(
@@ -459,7 +541,7 @@ mod tests {
         };
 
         // Quiet format should just print the RSS bytes
-        OutputFormatter::format(&result, OutputFormat::Quiet, false).unwrap();
+        OutputFormatter::format(&result, OutputFormat::Quiet, false, None).unwrap();
     }
 
     #[test]
@@ -526,7 +608,7 @@ mod tests {
         };
 
         // Test verbose format - should not panic
-        OutputFormatter::format(&result, OutputFormat::Human, true).unwrap();
+        OutputFormatter::format(&result, OutputFormat::Human, true, None).unwrap();
     }
 
     #[test]
@@ -549,7 +631,7 @@ mod tests {
         };
 
         // Test verbose format without process tree
-        OutputFormatter::format(&result, OutputFormat::Human, true).unwrap();
+        OutputFormatter::format(&result, OutputFormat::Human, true, None).unwrap();
     }
 
     #[test]

@@ -269,7 +269,11 @@ impl Application {
         let comparison =
             self.baseline_manager
                 .compare(baseline_name, result, self.args.regression_threshold)?;
-        OutputFormatter::format_comparison(&comparison, self.args.output_format())?;
+        OutputFormatter::format_comparison(
+            &comparison,
+            self.args.output_format(),
+            self.args.units,
+        )?;
 
         if comparison.regression_detected {
             Ok(Some(1))
@@ -280,7 +284,12 @@ impl Application {
 
     /// Handles normal output (no comparison).
     fn handle_normal_output(&self, result: &types::MonitorResult) -> Result<Option<i32>> {
-        OutputFormatter::format(result, self.args.output_format(), self.args.verbose)?;
+        OutputFormatter::format(
+            result,
+            self.args.output_format(),
+            self.args.verbose,
+            self.args.units,
+        )?;
 
         if result.threshold_exceeded {
             Ok(Some(1))
