@@ -53,6 +53,13 @@ includes timestamps and memory values for later analysis.
 .BR \-\-interval " " \fIMS\fR
 Set the sampling interval in milliseconds (default: 100). Lower values
 provide more accurate peak detection but increase overhead.
+.TP
+.BR \-\-units " " \fIUNIT\fR
+Force specific memory units in human-readable output instead of automatic
+sizing. Supported units: B (bytes), KB (kilobytes), MB (megabytes),
+GB (gigabytes), KiB (kibibytes), MiB (mebibytes), GiB (gibibytes).
+This option affects all human-readable output including verbose mode
+and baseline comparisons.
 .SS Baseline Management Options
 .TP
 .BR \-\-save\-baseline " " \fINAME\fR
@@ -118,6 +125,12 @@ Monitor only the main process, ignoring children:
 .PP
 .RS
 .B peak-mem --no-children -- ./parent-process
+.RE
+.SS Fixed Memory Units
+Display memory usage in megabytes:
+.PP
+.RS
+.B peak-mem --units MB -- ./myapp
 .RE
 .SS Combined Options
 Verbose output with threshold and timeline:

@@ -27,6 +27,7 @@ OPTIONS
     --no-children           Don't track child processes
     --timeline FILE         Record timeline
     --interval MS           Sampling interval (default: 100)
+    --units UNIT            Force memory units (B, KB, MB, GB, KiB, MiB, GiB)
 
     Memory Regression Detection:
     --save-baseline NAME    Save current run as baseline
@@ -46,6 +47,9 @@ EXAMPLES
 
     Set 1GB threshold:
     peak-mem --threshold 1G -- ./test
+
+    Force output in megabytes:
+    peak-mem --units MB -- ./myapp
 
     Memory regression detection:
     # Save a baseline
