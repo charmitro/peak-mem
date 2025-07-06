@@ -31,8 +31,8 @@ impl MemoryUnit {
 #[derive(Parser, Debug)]
 #[command(
     name = "peak-mem",
-    about = "Lightweight memory usage monitor for any process",
     author,
+    about = "Lightweight memory usage monitor for any process",
     long_about = "Peak-mem monitors and reports the peak memory usage of any program during its execution.\n\n\
                   It tracks both resident set size (RSS) and virtual memory size (VSZ) with minimal overhead.",
     disable_version_flag = true
