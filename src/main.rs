@@ -37,6 +37,11 @@ impl Application {
 
     /// Runs the application.
     async fn run(self) -> Result<()> {
+        // Handle version
+        if self.handle_version() {
+            return Ok(());
+        }
+
         // Handle baseline-only operations
         if self.handle_baseline_only_operations()? {
             return Ok(());
@@ -47,6 +52,18 @@ impl Application {
 
         // Handle output and exit
         self.handle_results(result)
+    }
+
+    fn handle_version(&self) -> bool {
+        if self.args.short_version {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            return true;
+        } else if self.args.long_version {
+            println!("peak-mem {}", env!("CARGO_PKG_VERSION"));
+            return true;
+        }
+
+        false
     }
 
     /// Handles baseline operations that don't require running a command.

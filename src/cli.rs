@@ -32,17 +32,17 @@ impl MemoryUnit {
 #[command(
     name = "peak-mem",
     about = "Lightweight memory usage monitor for any process",
-    version,
     author,
     long_about = "Peak-mem monitors and reports the peak memory usage of any program during its execution.\n\n\
-                  It tracks both resident set size (RSS) and virtual memory size (VSZ) with minimal overhead."
+                  It tracks both resident set size (RSS) and virtual memory size (VSZ) with minimal overhead.",
+    disable_version_flag = true
 )]
 pub struct Cli {
     #[arg(
         trailing_var_arg = true,
         value_name = "COMMAND",
         help = "Command to execute and monitor",
-        required_unless_present_any = &["list_baselines", "delete_baseline"]
+        required_unless_present_any = &["list_baselines", "delete_baseline", "short_version", "long_version"]
     )]
     pub command: Vec<String>,
 
@@ -171,6 +171,12 @@ pub struct Cli {
         conflicts_with_all = &["command", "save_baseline", "compare_baseline", "list_baselines"]
     )]
     pub delete_baseline: Option<String>,
+
+    #[arg(short = 'V', help = "Short version")]
+    pub short_version: bool,
+
+    #[arg(long = "version", help = "Long version info")]
+    pub long_version: bool,
 }
 
 fn parse_threshold(s: &str) -> Result<ByteSize> {
