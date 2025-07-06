@@ -1,14 +1,17 @@
 image: archlinux
 packages:
-  - rust
+  - rustup
   - git
 sources:
   - https://git.sr.ht/~charmitro/peak-mem
 tasks:
+  - setup: |
+      rustup toolchain install stable
+      rustup toolchain install nightly
+      rustup default stable
   - clippy: |
       cd peak-mem
       cargo clippy --all-targets --all-features -- -D warnings
   - fmt-check: |
       cd peak-mem
-      rustup toolchain install nightly
       cargo +nightly fmt --check
