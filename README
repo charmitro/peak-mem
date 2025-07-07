@@ -100,7 +100,7 @@ PLATFORM SUPPORT
 
     Linux    - Implemented via /proc
     macOS    - Implemented via proc_pidinfo
-    FreeBSD  - Not implemented
+    FreeBSD  - Implemented via sysinfo
     Windows  - Not implemented
 
 LICENSE
