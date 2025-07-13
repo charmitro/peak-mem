@@ -6,8 +6,7 @@ sources:
 tasks:
   - check: |
       cd peak-mem
-      # Only run compilation check since FreeBSD support is not implemented
-      cargo check --verbose
+      cargo test --verbose
   - build: |
       cd peak-mem
       # Build to ensure it compiles, but don't run
