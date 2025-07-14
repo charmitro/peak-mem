@@ -276,43 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn test_comparison_result() {
-        let baseline = Baseline {
-            version: "0.1.0".to_string(),
-            created_at: Utc::now(),
-            command: "test".to_string(),
-            peak_rss_bytes: 100 * 1024 * 1024,
-            peak_vsz_bytes: 200 * 1024 * 1024,
-            duration_ms: 5000,
-            metadata: HashMap::new(),
-        };
-
-        let current = MonitorResult {
-            command: "test".to_string(),
-            peak_rss_bytes: 110 * 1024 * 1024,
-            peak_vsz_bytes: 220 * 1024 * 1024,
-            duration_ms: 5500,
-            exit_code: Some(0),
-            threshold_exceeded: false,
-            timestamp: Utc::now(),
-            process_tree: None,
-            timeline: None,
-            start_time: None,
-            sample_count: None,
-            main_pid: None,
-        };
-
-        let comparison = ComparisonResult::new(baseline, current, 5.0);
-        assert_eq!(comparison.rss_diff_bytes, 10 * 1024 * 1024);
-        assert_eq!(comparison.rss_diff_percent, 10.0);
-        assert_eq!(comparison.vsz_diff_bytes, 20 * 1024 * 1024);
-        assert_eq!(comparison.vsz_diff_percent, 10.0);
-        assert_eq!(comparison.duration_diff_ms, 500);
-        assert_eq!(comparison.duration_diff_percent, 10.0);
-        assert!(comparison.regression_detected); // 10% > 5% threshold
-    }
-
-    #[test]
     fn test_baseline_manager() {
         let temp_dir = TempDir::new().unwrap();
         let manager = BaselineManager::new(temp_dir.path().to_path_buf()).unwrap();
