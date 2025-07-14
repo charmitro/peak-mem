@@ -10,10 +10,18 @@ pub struct FreeBSDMonitor {
 
 impl FreeBSDMonitor {
     pub fn new() -> Result<Self> {
-        Ok(FreeBSDMonitor {
-            system: std::sync::Mutex::new(System::new_with_specifics(
+        // On FreeBSD, we avoid initializing with process refresh in tests
+        // to prevent signal conflicts with the test runner
+        let system = if cfg!(test) {
+            System::new()
+        } else {
+            System::new_with_specifics(
                 RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
-            )),
+            )
+        };
+
+        Ok(FreeBSDMonitor {
+            system: std::sync::Mutex::new(system),
         })
     }
 
