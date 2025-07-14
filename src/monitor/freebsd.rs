@@ -55,6 +55,22 @@ impl FreeBSDMonitor {
         Ok((name, rss_bytes, vsz_bytes))
     }
 
+    fn collect_child_pids(&self, pid: u32) -> Vec<u32> {
+        let sysinfo_pid = Pid::from_u32(pid);
+        let system = self.system.lock().unwrap();
+        system
+            .processes()
+            .iter()
+            .filter_map(|(child_pid, child_process)| {
+                if child_process.parent() == Some(sysinfo_pid) {
+                    Some(child_pid.as_u32())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     async fn build_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo> {
         self.refresh_process(pid)?;
         let (name, rss_bytes, vsz_bytes) = self.get_process_info(pid)?;
@@ -66,21 +82,7 @@ impl FreeBSDMonitor {
         };
 
         // Get child processes
-        let sysinfo_pid = Pid::from_u32(pid);
-        let child_pids: Vec<u32> = {
-            let system = self.system.lock().unwrap();
-            system
-                .processes()
-                .iter()
-                .filter_map(|(child_pid, child_process)| {
-                    if child_process.parent() == Some(sysinfo_pid) {
-                        Some(child_pid.as_u32())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
+        let child_pids = self.collect_child_pids(pid);
 
         // Build child trees
         let mut children = Vec::new();
@@ -123,22 +125,6 @@ impl MemoryMonitor for FreeBSDMonitor {
             system.refresh_processes();
         }
 
-        let sysinfo_pid = Pid::from_u32(pid);
-        let child_pids: Vec<u32> = {
-            let system = self.system.lock().unwrap();
-            system
-                .processes()
-                .iter()
-                .filter_map(|(child_pid, child_process)| {
-                    if child_process.parent() == Some(sysinfo_pid) {
-                        Some(child_pid.as_u32())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-
-        Ok(child_pids)
+        Ok(self.collect_child_pids(pid))
     }
 }
