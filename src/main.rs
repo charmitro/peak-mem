@@ -316,11 +316,21 @@ impl Application {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = cli::Cli::parse();
-    let app = Application::new(args)?;
-    app.run().await
+fn main() -> Result<()> {
+    // Configure tokio runtime with optimized thread stack size for
+    // Linux/macOS. Based on measurements showing ~10KB actual usage
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    builder.thread_stack_size(128 * 1024); // 128KB (vs default 2MB)
+
+    let runtime = builder.enable_all().build()?;
+
+    runtime.block_on(async {
+        let args = cli::Cli::parse();
+        let app = Application::new(args)?;
+        app.run().await
+    })
 }
 
 async fn run_with_realtime_display(
