@@ -116,7 +116,7 @@ impl Application {
 
         // Run process with optional real-time display
         let exit_code = if self.args.watch {
-            run_with_realtime_display(handle, &tracker, self.args.interval).await?
+            run_with_realtime_display(handle, &tracker, self.args.interval, self.args.units).await?
         } else {
             handle.wait_with_signal_forwarding().await?
         };
@@ -337,6 +337,7 @@ async fn run_with_realtime_display(
     handle: process::ProcessHandle,
     tracker: &MemoryTracker,
     interval_ms: u64,
+    units: Option<cli::MemoryUnit>,
 ) -> Result<Option<i32>> {
     let pid = handle.pid();
     let monitor = monitor::create_monitor()?;
@@ -344,7 +345,7 @@ async fn run_with_realtime_display(
     let peak_vsz_atom = tracker.peak_vsz.clone();
 
     let monitor_task = tokio::spawn(async move {
-        let mut display = RealtimeDisplay::new();
+        let mut display = RealtimeDisplay::new(units);
         let mut interval = time::interval(time::Duration::from_millis(interval_ms));
 
         loop {

@@ -458,12 +458,16 @@ impl OutputFormatter {
 /// Uses terminal control sequences to update the display in-place.
 pub struct RealtimeDisplay {
     last_line_count: usize,
+    units: Option<MemoryUnit>,
 }
 
 impl RealtimeDisplay {
     /// Creates a new real-time display handler.
-    pub fn new() -> Self {
-        Self { last_line_count: 0 }
+    pub fn new(units: Option<MemoryUnit>) -> Self {
+        Self {
+            last_line_count: 0,
+            units,
+        }
     }
 
     /// Updates the display with current memory values.
@@ -492,8 +496,23 @@ impl RealtimeDisplay {
         }
 
         // Print new status
-        writeln!(stdout, "Current RSS: {current_rss} | Peak RSS: {peak_rss}")?;
-        writeln!(stdout, "Current VSZ: {current_vsz} | Peak VSZ: {peak_vsz}")?;
+        if let Some(unit) = self.units {
+            writeln!(
+                stdout,
+                "Current RSS: {} | Peak RSS: {}",
+                unit.format(current_rss.as_u64()),
+                unit.format(peak_rss.as_u64())
+            )?;
+            writeln!(
+                stdout,
+                "Current VSZ: {} | Peak VSZ: {}",
+                unit.format(current_vsz.as_u64()),
+                unit.format(peak_vsz.as_u64())
+            )?;
+        } else {
+            writeln!(stdout, "Current RSS: {current_rss} | Peak RSS: {peak_rss}")?;
+            writeln!(stdout, "Current VSZ: {current_vsz} | Peak VSZ: {peak_vsz}")?;
+        }
         stdout.flush()?;
 
         self.last_line_count = 2;
