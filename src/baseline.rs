@@ -3,10 +3,10 @@
 //! This module provides functionality to save memory usage snapshots as
 //! baselines and compare new measurements against them to detect regressions.
 
-use crate::types::{MonitorResult, PeakMemError, Result};
-use chrono::{DateTime, Utc};
+use crate::types::{MonitorResult, Result, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -19,7 +19,7 @@ pub struct Baseline {
     /// Version of peak-mem that created this baseline.
     pub version: String,
     /// When this baseline was created.
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// Command that was monitored.
     pub command: String,
     /// Peak RSS value in bytes.
@@ -44,7 +44,7 @@ impl From<&MonitorResult> for Baseline {
 
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             command: result.command.clone(),
             peak_rss_bytes: result.peak_rss_bytes,
             peak_vsz_bytes: result.peak_vsz_bytes,
@@ -154,11 +154,37 @@ impl BaselineManager {
     /// Uses the system cache directory if available, otherwise
     /// falls back to a local directory.
     pub fn default_dir() -> PathBuf {
-        if let Some(cache_dir) = dirs::cache_dir() {
-            cache_dir.join("peak-mem").join("baselines")
-        } else {
-            PathBuf::from(".peak-mem-baselines")
+        // Try XDG_CACHE_HOME first (Linux/Unix standard)
+        if let Ok(xdg_cache) = env::var("XDG_CACHE_HOME") {
+            return PathBuf::from(xdg_cache).join("peak-mem").join("baselines");
         }
+
+        // Try HOME for default cache location
+        if let Ok(home) = env::var("HOME") {
+            #[cfg(target_os = "macos")]
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Caches")
+                .join("peak-mem")
+                .join("baselines");
+
+            #[cfg(not(target_os = "macos"))]
+            return PathBuf::from(home)
+                .join(".cache")
+                .join("peak-mem")
+                .join("baselines");
+        }
+
+        // Windows: try LOCALAPPDATA
+        #[cfg(windows)]
+        if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data)
+                .join("peak-mem")
+                .join("baselines");
+        }
+
+        // Fallback to local directory
+        PathBuf::from(".peak-mem-baselines")
     }
 
     /// Saves a monitoring result as a baseline.
@@ -174,8 +200,7 @@ impl BaselineManager {
         let filename = format!("{}.json", sanitize_filename(name));
         let path = self.baselines_dir.join(&filename);
 
-        let json = serde_json::to_string_pretty(&baseline)
-            .map_err(|e| PeakMemError::Io(std::io::Error::other(e)))?;
+        let json = serde_json::to_string_pretty(&baseline)?;
 
         fs::write(&path, json)?;
         Ok(path)
@@ -186,8 +211,7 @@ impl BaselineManager {
         let path = self.baselines_dir.join(&filename);
 
         let json = fs::read_to_string(&path)?;
-        let baseline: Baseline = serde_json::from_str(&json)
-            .map_err(|e| PeakMemError::Parse(format!("Failed to parse baseline: {e}")))?;
+        let baseline: Baseline = serde_json::from_str(&json)?;
 
         Ok(baseline)
     }
@@ -257,7 +281,7 @@ mod tests {
             duration_ms: 5000,
             exit_code: Some(0),
             threshold_exceeded: false,
-            timestamp: Utc::now(),
+            timestamp: Timestamp::now(),
             process_tree: None,
             timeline: None,
             start_time: None,
@@ -287,7 +311,7 @@ mod tests {
             duration_ms: 5000,
             exit_code: Some(0),
             threshold_exceeded: false,
-            timestamp: Utc::now(),
+            timestamp: Timestamp::now(),
             process_tree: None,
             timeline: None,
             start_time: None,

@@ -1,5 +1,4 @@
-use anyhow::Result;
-use bytesize::ByteSize;
+use crate::types::{ByteSize, PeakMemError, Result};
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 
@@ -181,13 +180,14 @@ pub struct Cli {
 
 fn parse_threshold(s: &str) -> Result<ByteSize> {
     s.parse::<ByteSize>()
-        .map_err(|_| anyhow::anyhow!("Invalid threshold format. Use formats like: 512M, 1G, 1.5GB"))
 }
 
 fn parse_interval(s: &str) -> Result<u64> {
     let interval: u64 = s.parse()?;
     if interval == 0 {
-        anyhow::bail!("Interval must be greater than zero");
+        return Err(PeakMemError::InvalidArgument(
+            "Interval must be greater than zero".to_string(),
+        ));
     }
     Ok(interval)
 }
@@ -201,7 +201,9 @@ fn parse_units(s: &str) -> Result<MemoryUnit> {
         "KiB" => Ok(MemoryUnit::Kibibytes),
         "MiB" => Ok(MemoryUnit::Mebibytes),
         "GiB" => Ok(MemoryUnit::Gibibytes),
-        _ => anyhow::bail!("Invalid unit. Use one of: B, KB, MB, GB, KiB, MiB, GiB"),
+        _ => Err(PeakMemError::InvalidArgument(
+            "Invalid unit. Use one of: B, KB, MB, GB, KiB, MiB, GiB".to_string(),
+        )),
     }
 }
 

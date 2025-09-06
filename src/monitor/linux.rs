@@ -1,8 +1,8 @@
 use crate::monitor::MemoryMonitor;
-use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result};
-use async_trait::async_trait;
-use chrono::Utc;
+use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result, Timestamp};
 use procfs::process::Process;
+use std::future::Future;
+use std::pin::Pin;
 
 pub struct LinuxMonitor;
 
@@ -40,53 +40,67 @@ impl LinuxMonitor {
     }
 }
 
-#[async_trait]
 impl MemoryMonitor for LinuxMonitor {
-    async fn get_memory_usage(&self, pid: u32) -> Result<MemoryUsage> {
-        let (rss_bytes, vsz_bytes) = self.read_proc_status(pid)?;
+    fn get_memory_usage(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<MemoryUsage>> + Send + '_>> {
+        Box::pin(async move {
+            let (rss_bytes, vsz_bytes) = self.read_proc_status(pid)?;
 
-        Ok(MemoryUsage {
-            rss_bytes,
-            vsz_bytes,
-            timestamp: Utc::now(),
+            Ok(MemoryUsage {
+                rss_bytes,
+                vsz_bytes,
+                timestamp: Timestamp::now(),
+            })
         })
     }
 
-    async fn get_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo> {
-        let memory = self.get_memory_usage(pid).await?;
-        let name = self.get_process_name(pid);
-        let child_pids = self.get_child_pids(pid).await?;
+    fn get_process_tree(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessMemoryInfo>> + Send + '_>> {
+        Box::pin(async move {
+            let memory = self.get_memory_usage(pid).await?;
+            let name = self.get_process_name(pid);
+            let child_pids = self.get_child_pids(pid).await?;
 
-        let mut children = Vec::new();
-        for child_pid in child_pids {
-            if let Ok(child_info) = Box::pin(self.get_process_tree(child_pid)).await {
-                children.push(child_info);
+            let mut children = Vec::new();
+            for child_pid in child_pids {
+                if let Ok(child_info) = self.get_process_tree(child_pid).await {
+                    children.push(child_info);
+                }
             }
-        }
 
-        Ok(ProcessMemoryInfo {
-            pid,
-            name,
-            memory,
-            children,
+            Ok(ProcessMemoryInfo {
+                pid,
+                name,
+                memory,
+                children,
+            })
         })
     }
 
-    async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>> {
-        let mut children = Vec::new();
+    fn get_child_pids(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u32>>> + Send + '_>> {
+        Box::pin(async move {
+            let mut children = Vec::new();
 
-        // Use procfs to iterate through all processes
-        if let Ok(all_procs) = procfs::process::all_processes() {
-            for process in all_procs.flatten() {
-                if let Ok(stat) = process.stat() {
-                    if stat.ppid == pid as i32 {
-                        children.push(stat.pid as u32);
+            // Use procfs to iterate through all processes
+            if let Ok(all_procs) = procfs::process::all_processes() {
+                for process in all_procs.flatten() {
+                    if let Ok(stat) = process.stat() {
+                        if stat.ppid == pid as i32 {
+                            children.push(stat.pid as u32);
+                        }
                     }
                 }
             }
-        }
 
-        Ok(children)
+            Ok(children)
+        })
     }
 }
 

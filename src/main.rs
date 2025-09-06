@@ -5,9 +5,8 @@ mod output;
 mod process;
 mod types;
 
-use anyhow::Result;
+use crate::types::{ByteSize, PeakMemError, Result, Timestamp};
 use baseline::BaselineManager;
-use bytesize::ByteSize;
 use clap::Parser;
 use monitor::tracker::MemoryTracker;
 use output::{OutputFormatter, RealtimeDisplay};
@@ -111,7 +110,7 @@ impl Application {
         let monitor = monitor::create_monitor()?;
         let tracker = MemoryTracker::new(monitor, pid, !self.args.no_children);
         let start_time = Instant::now();
-        let start_timestamp = chrono::Utc::now();
+        let start_timestamp = Timestamp::now();
         let tracker_handle = tracker.start(self.args.interval).await;
 
         // Run process with optional real-time display
@@ -143,7 +142,7 @@ impl Application {
         command: String,
         tracker: &MemoryTracker,
         start_time: Instant,
-        start_timestamp: chrono::DateTime<chrono::Utc>,
+        start_timestamp: Timestamp,
         exit_code: Option<i32>,
         pid: u32,
     ) -> Result<types::MonitorResult> {
@@ -167,7 +166,7 @@ impl Application {
             duration_ms,
             exit_code,
             threshold_exceeded,
-            timestamp: chrono::Utc::now(),
+            timestamp: Timestamp::now(),
             process_tree,
             timeline,
             start_time: start_time_opt,
@@ -217,14 +216,10 @@ impl Application {
     /// Gets verbose data if verbose mode is enabled.
     fn get_verbose_data(
         &self,
-        start_timestamp: chrono::DateTime<chrono::Utc>,
+        start_timestamp: Timestamp,
         sample_count: u64,
         pid: u32,
-    ) -> (
-        Option<chrono::DateTime<chrono::Utc>>,
-        Option<u64>,
-        Option<u32>,
-    ) {
+    ) -> (Option<Timestamp>, Option<u64>, Option<u32>) {
         if self.args.verbose {
             (Some(start_timestamp), Some(sample_count), Some(pid))
         } else {
@@ -324,7 +319,10 @@ fn main() -> Result<()> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     builder.thread_stack_size(128 * 1024); // 128KB (vs default 2MB)
 
-    let runtime = builder.enable_all().build()?;
+    let runtime = builder
+        .enable_all()
+        .build()
+        .map_err(|e| PeakMemError::Runtime(format!("Failed to build runtime: {}", e)))?;
 
     runtime.block_on(async {
         let args = cli::Cli::parse();

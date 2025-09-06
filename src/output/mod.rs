@@ -5,10 +5,49 @@
 
 use crate::baseline::ComparisonResult;
 use crate::cli::{MemoryUnit, OutputFormat};
-use crate::types::{MonitorResult, ProcessMemoryInfo};
-use anyhow::Result;
-use bytesize::ByteSize;
+use crate::types::{ByteSize, MonitorResult, ProcessMemoryInfo, Result};
 use std::io::{self, Write};
+
+/// Simple CSV writer that handles escaping
+struct CsvWriter<W: Write> {
+    writer: W,
+}
+
+impl<W: Write> CsvWriter<W> {
+    fn new(writer: W) -> Self {
+        CsvWriter { writer }
+    }
+
+    /// Write a single CSV record (row)
+    fn write_record(&mut self, fields: &[&str]) -> Result<()> {
+        for (i, field) in fields.iter().enumerate() {
+            if i > 0 {
+                write!(self.writer, ",")?;
+            }
+            // Escape field if it contains comma, quote, or newline
+            if field.contains(',') || field.contains('"') || field.contains('\n') {
+                write!(self.writer, "\"")?;
+                for c in field.chars() {
+                    if c == '"' {
+                        write!(self.writer, "\"\"")?;
+                    } else {
+                        write!(self.writer, "{}", c)?;
+                    }
+                }
+                write!(self.writer, "\"")?;
+            } else {
+                write!(self.writer, "{}", field)?;
+            }
+        }
+        writeln!(self.writer)?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.writer.flush()?;
+        Ok(())
+    }
+}
 
 /// Handles formatting of monitoring results for different output formats.
 pub struct OutputFormatter;
@@ -79,9 +118,9 @@ impl OutputFormatter {
     }
 
     fn format_csv(result: &MonitorResult) -> Result<()> {
-        let mut wtr = csv::Writer::from_writer(io::stdout());
+        let mut wtr = CsvWriter::new(io::stdout());
 
-        wtr.write_record([
+        wtr.write_record(&[
             "command",
             "peak_rss_bytes",
             "peak_vsz_bytes",
@@ -91,12 +130,13 @@ impl OutputFormatter {
             "timestamp",
         ])?;
 
-        wtr.write_record([
+        let exit_code_str = result.exit_code.map_or(String::new(), |c| c.to_string());
+        wtr.write_record(&[
             &result.command,
             &result.peak_rss_bytes.to_string(),
             &result.peak_vsz_bytes.to_string(),
             &result.duration_ms.to_string(),
-            &result.exit_code.map_or("".to_string(), |c| c.to_string()),
+            &exit_code_str,
             &result.threshold_exceeded.to_string(),
             &result.timestamp.to_rfc3339(),
         ])?;
@@ -116,11 +156,7 @@ impl OutputFormatter {
         // Header
         writeln!(stdout, "Command: {}", result.command)?;
         if let Some(start_time) = result.start_time {
-            writeln!(
-                stdout,
-                "Started: {} UTC",
-                start_time.format("%Y-%m-%d %H:%M:%S")
-            )?;
+            writeln!(stdout, "Started: {} UTC", start_time.format_datetime())?;
         }
         if let Some(pid) = result.main_pid {
             writeln!(stdout, "Process ID: {pid}")?;
@@ -401,9 +437,9 @@ impl OutputFormatter {
     }
 
     fn format_comparison_csv(comparison: &ComparisonResult) -> Result<()> {
-        let mut wtr = csv::Writer::from_writer(io::stdout());
+        let mut wtr = CsvWriter::new(io::stdout());
 
-        wtr.write_record([
+        wtr.write_record(&[
             "baseline_command",
             "baseline_rss_bytes",
             "baseline_vsz_bytes",
@@ -421,7 +457,7 @@ impl OutputFormatter {
             "regression_detected",
         ])?;
 
-        wtr.write_record([
+        wtr.write_record(&[
             &comparison.baseline.command,
             &comparison.baseline.peak_rss_bytes.to_string(),
             &comparison.baseline.peak_vsz_bytes.to_string(),
@@ -539,8 +575,7 @@ impl RealtimeDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::MemoryUsage;
-    use chrono::Utc;
+    use crate::types::{MemoryUsage, Timestamp};
 
     #[test]
     fn test_format_quiet() {
@@ -551,7 +586,7 @@ mod tests {
             duration_ms: 1000,
             exit_code: Some(0),
             threshold_exceeded: false,
-            timestamp: Utc::now(),
+            timestamp: Timestamp::now(),
             process_tree: None,
             timeline: None,
             start_time: None,
@@ -565,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_format_verbose() {
-        let now = Utc::now();
+        let now = Timestamp::now();
 
         // Create a sample process tree
         let child_process = ProcessMemoryInfo {
@@ -632,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_format_verbose_no_children() {
-        let now = Utc::now();
+        let now = Timestamp::now();
 
         let result = MonitorResult {
             command: "echo test".to_string(),
@@ -655,7 +690,7 @@ mod tests {
 
     #[test]
     fn test_count_processes() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let tree = ProcessMemoryInfo {
             pid: 1,
             name: "root".to_string(),

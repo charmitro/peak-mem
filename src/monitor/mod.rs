@@ -5,7 +5,8 @@
 //! implementations.
 
 use crate::types::{MemoryUsage, ProcessMemoryInfo, Result};
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -28,7 +29,6 @@ pub mod freebsd;
 /// Each platform must implement this trait to provide memory monitoring
 /// capabilities. The trait is async to support potentially blocking
 /// system calls without blocking the runtime.
-#[async_trait]
 pub trait MemoryMonitor: Send + Sync {
     /// Get the current memory usage for a specific process.
     ///
@@ -37,7 +37,10 @@ pub trait MemoryMonitor: Send + Sync {
     ///
     /// # Returns
     /// * `Result<MemoryUsage>` - Current memory statistics or error
-    async fn get_memory_usage(&self, pid: u32) -> Result<MemoryUsage>;
+    fn get_memory_usage(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<MemoryUsage>> + Send + '_>>;
 
     /// Get the complete process tree with memory information.
     ///
@@ -46,7 +49,10 @@ pub trait MemoryMonitor: Send + Sync {
     ///
     /// # Returns
     /// * `Result<ProcessMemoryInfo>` - Process tree with memory data or error
-    async fn get_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo>;
+    fn get_process_tree(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessMemoryInfo>> + Send + '_>>;
 
     /// Get the list of child process IDs for a given process.
     ///
@@ -56,7 +62,10 @@ pub trait MemoryMonitor: Send + Sync {
     /// # Returns
     /// * `Result<Vec<u32>>` - List of child PIDs or error
     #[allow(dead_code)]
-    async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>>;
+    fn get_child_pids(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u32>>> + Send + '_>>;
 }
 
 /// Thread-safe shared reference to a memory monitor.

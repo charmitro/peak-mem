@@ -1,7 +1,7 @@
 use crate::monitor::MemoryMonitor;
-use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result};
-use async_trait::async_trait;
-use chrono::Utc;
+use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result, Timestamp};
+use std::future::Future;
+use std::pin::Pin;
 use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
 
 pub struct FreeBSDMonitor {
@@ -78,7 +78,7 @@ impl FreeBSDMonitor {
         let memory = MemoryUsage {
             rss_bytes,
             vsz_bytes,
-            timestamp: Utc::now(),
+            timestamp: Timestamp::now(),
         };
 
         // Get child processes
@@ -102,29 +102,41 @@ impl FreeBSDMonitor {
     }
 }
 
-#[async_trait]
 impl MemoryMonitor for FreeBSDMonitor {
-    async fn get_memory_usage(&self, pid: u32) -> Result<MemoryUsage> {
-        self.refresh_process(pid)?;
-        let (_name, rss_bytes, vsz_bytes) = self.get_process_info(pid)?;
+    fn get_memory_usage(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<MemoryUsage>> + Send + '_>> {
+        Box::pin(async move {
+            self.refresh_process(pid)?;
+            let (_name, rss_bytes, vsz_bytes) = self.get_process_info(pid)?;
 
-        Ok(MemoryUsage {
-            rss_bytes,
-            vsz_bytes,
-            timestamp: Utc::now(),
+            Ok(MemoryUsage {
+                rss_bytes,
+                vsz_bytes,
+                timestamp: Timestamp::now(),
+            })
         })
     }
 
-    async fn get_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo> {
-        self.build_process_tree(pid).await
+    fn get_process_tree(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessMemoryInfo>> + Send + '_>> {
+        Box::pin(async move { self.build_process_tree(pid).await })
     }
 
-    async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>> {
-        {
-            let mut system = self.system.lock().unwrap();
-            system.refresh_processes();
-        }
+    fn get_child_pids(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u32>>> + Send + '_>> {
+        Box::pin(async move {
+            {
+                let mut system = self.system.lock().unwrap();
+                system.refresh_processes();
+            }
 
-        Ok(self.collect_child_pids(pid))
+            Ok(self.collect_child_pids(pid))
+        })
     }
 }

@@ -1,8 +1,8 @@
 use crate::monitor::MemoryMonitor;
-use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result};
-use async_trait::async_trait;
-use chrono::Utc;
+use crate::types::{MemoryUsage, PeakMemError, ProcessMemoryInfo, Result, Timestamp};
+use std::future::Future;
 use std::mem;
+use std::pin::Pin;
 
 pub struct MacOSMonitor;
 
@@ -28,8 +28,8 @@ impl MacOSMonitor {
         };
 
         if ret <= 0 {
-            return Err(PeakMemError::PermissionDenied(format!(
-                "Cannot access process {pid} memory info"
+            return Err(PeakMemError::ProcessSpawn(format!(
+                "Process {pid} not found"
             )));
         }
 
@@ -37,146 +37,161 @@ impl MacOSMonitor {
     }
 }
 
-#[async_trait]
 impl MemoryMonitor for MacOSMonitor {
-    async fn get_memory_usage(&self, pid: u32) -> Result<MemoryUsage> {
-        let (rss_bytes, vsz_bytes) = self.get_memory_for_pid(pid)?;
+    fn get_memory_usage(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<MemoryUsage>> + Send + '_>> {
+        Box::pin(async move {
+            let (rss_bytes, vsz_bytes) = self.get_memory_for_pid(pid)?;
 
-        Ok(MemoryUsage {
-            rss_bytes,
-            vsz_bytes,
-            timestamp: Utc::now(),
+            Ok(MemoryUsage {
+                rss_bytes,
+                vsz_bytes,
+                timestamp: Timestamp::now(),
+            })
         })
     }
 
-    async fn get_process_tree(&self, pid: u32) -> Result<ProcessMemoryInfo> {
-        let memory = self.get_memory_usage(pid).await?;
-        let name = get_process_name(pid)?;
-        let child_pids = self.get_child_pids(pid).await?;
+    fn get_process_tree(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessMemoryInfo>> + Send + '_>> {
+        Box::pin(async move {
+            let memory = self.get_memory_usage(pid).await?;
+            let name = get_process_name(pid)?;
+            let child_pids = self.get_child_pids(pid).await?;
 
-        let mut children = Vec::new();
-        for child_pid in child_pids {
-            if let Ok(child_info) = Box::pin(self.get_process_tree(child_pid)).await {
-                children.push(child_info);
+            let mut children = Vec::new();
+            for child_pid in child_pids {
+                if let Ok(child_info) = self.get_process_tree(child_pid).await {
+                    children.push(child_info);
+                }
             }
-        }
 
-        Ok(ProcessMemoryInfo {
-            pid,
-            name,
-            memory,
-            children,
+            Ok(ProcessMemoryInfo {
+                pid,
+                name,
+                memory,
+                children,
+            })
         })
     }
 
-    async fn get_child_pids(&self, pid: u32) -> Result<Vec<u32>> {
-        // Use libproc to get process list - the modern macOS approach
-        // This is more reliable than parsing sysctl's kinfo_proc structure
-        // which has undocumented layout changes between macOS versions
-        use std::ptr;
+    fn get_child_pids(
+        &self,
+        pid: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u32>>> + Send + '_>> {
+        Box::pin(async move {
+            // Use libproc to get process list - the modern macOS approach
+            // This is more reliable than parsing sysctl's kinfo_proc structure
+            // which has undocumented layout changes between macOS versions
+            use std::ptr;
 
-        // External functions from libproc
-        extern "C" {
-            fn proc_listpids(
-                type_: u32,
-                typeinfo: u32,
-                buffer: *mut libc::c_void,
-                buffersize: libc::c_int,
-            ) -> libc::c_int;
+            // External functions from libproc
+            extern "C" {
+                fn proc_listpids(
+                    type_: u32,
+                    typeinfo: u32,
+                    buffer: *mut libc::c_void,
+                    buffersize: libc::c_int,
+                ) -> libc::c_int;
 
-            fn proc_pidinfo(
-                pid: libc::c_int,
-                flavor: libc::c_int,
-                arg: u64,
-                buffer: *mut libc::c_void,
-                buffersize: libc::c_int,
-            ) -> libc::c_int;
-        }
-
-        const PROC_ALL_PIDS: u32 = 1;
-        const PROC_PIDTBSDINFO: libc::c_int = 3;
-
-        #[repr(C)]
-        struct proc_bsdinfo {
-            pbi_flags: u32,
-            pbi_status: u32,
-            pbi_xstatus: u32,
-            pbi_pid: u32,
-            pbi_ppid: u32,
-            pbi_uid: libc::uid_t,
-            pbi_gid: libc::gid_t,
-            pbi_ruid: libc::uid_t,
-            pbi_rgid: libc::gid_t,
-            pbi_svuid: libc::uid_t,
-            pbi_svgid: libc::gid_t,
-            rfu_1: u32,
-            pbi_comm: [libc::c_char; 16],
-            pbi_name: [libc::c_char; 32],
-            pbi_nfiles: u32,
-            pbi_pgid: u32,
-            pbi_pjobc: u32,
-            e_tdev: u32,
-            e_tpgid: u32,
-            pbi_nice: libc::c_int,
-            pbi_start_tvsec: u64,
-            pbi_start_tvusec: u64,
-        }
-
-        // Get the size needed for all PIDs
-        let buffer_size = unsafe { proc_listpids(PROC_ALL_PIDS, 0, ptr::null_mut(), 0) };
-
-        if buffer_size <= 0 {
-            return Err(PeakMemError::Monitor(
-                "Failed to get process list size".to_string(),
-            ));
-        }
-
-        // Allocate buffer for PIDs
-        let pid_count = (buffer_size as usize) / mem::size_of::<libc::pid_t>();
-        let mut pids = vec![0 as libc::pid_t; pid_count];
-
-        // Get all PIDs
-        let bytes_returned = unsafe {
-            proc_listpids(
-                PROC_ALL_PIDS,
-                0,
-                pids.as_mut_ptr() as *mut libc::c_void,
-                buffer_size,
-            )
-        };
-
-        if bytes_returned <= 0 {
-            return Err(PeakMemError::Monitor(
-                "Failed to get process list".to_string(),
-            ));
-        }
-
-        let actual_pid_count = (bytes_returned as usize) / mem::size_of::<libc::pid_t>();
-        let mut children = Vec::new();
-
-        // Check each PID to see if it's a child of our target
-        for &check_pid in pids.iter().take(actual_pid_count) {
-            if check_pid == 0 {
-                continue;
+                fn proc_pidinfo(
+                    pid: libc::c_int,
+                    flavor: libc::c_int,
+                    arg: u64,
+                    buffer: *mut libc::c_void,
+                    buffersize: libc::c_int,
+                ) -> libc::c_int;
             }
 
-            let mut proc_info: proc_bsdinfo = unsafe { mem::zeroed() };
-            let ret = unsafe {
-                proc_pidinfo(
-                    check_pid,
-                    PROC_PIDTBSDINFO,
+            const PROC_ALL_PIDS: u32 = 1;
+            const PROC_PIDTBSDINFO: libc::c_int = 3;
+
+            #[repr(C)]
+            struct proc_bsdinfo {
+                pbi_flags: u32,
+                pbi_status: u32,
+                pbi_xstatus: u32,
+                pbi_pid: u32,
+                pbi_ppid: u32,
+                pbi_uid: libc::uid_t,
+                pbi_gid: libc::gid_t,
+                pbi_ruid: libc::uid_t,
+                pbi_rgid: libc::gid_t,
+                pbi_svuid: libc::uid_t,
+                pbi_svgid: libc::gid_t,
+                rfu_1: u32,
+                pbi_comm: [libc::c_char; 16],
+                pbi_name: [libc::c_char; 32],
+                pbi_nfiles: u32,
+                pbi_pgid: u32,
+                pbi_pjobc: u32,
+                e_tdev: u32,
+                e_tpgid: u32,
+                pbi_nice: libc::c_int,
+                pbi_start_tvsec: u64,
+                pbi_start_tvusec: u64,
+            }
+
+            // Get the size needed for all PIDs
+            let buffer_size = unsafe { proc_listpids(PROC_ALL_PIDS, 0, ptr::null_mut(), 0) };
+
+            if buffer_size <= 0 {
+                return Err(PeakMemError::Monitor(
+                    "Failed to get process list size".to_string(),
+                ));
+            }
+
+            // Allocate buffer for PIDs
+            let pid_count = (buffer_size as usize) / mem::size_of::<libc::pid_t>();
+            let mut pids = vec![0 as libc::pid_t; pid_count];
+
+            // Get all PIDs
+            let bytes_returned = unsafe {
+                proc_listpids(
+                    PROC_ALL_PIDS,
                     0,
-                    &mut proc_info as *mut _ as *mut libc::c_void,
-                    mem::size_of::<proc_bsdinfo>() as libc::c_int,
+                    pids.as_mut_ptr() as *mut libc::c_void,
+                    buffer_size,
                 )
             };
 
-            if ret == mem::size_of::<proc_bsdinfo>() as libc::c_int && proc_info.pbi_ppid == pid {
-                children.push(check_pid as u32);
+            if bytes_returned <= 0 {
+                return Err(PeakMemError::Monitor(
+                    "Failed to get process list".to_string(),
+                ));
             }
-        }
 
-        Ok(children)
+            let actual_pid_count = (bytes_returned as usize) / mem::size_of::<libc::pid_t>();
+            let mut children = Vec::new();
+
+            // Check each PID to see if it's a child of our target
+            for &check_pid in pids.iter().take(actual_pid_count) {
+                if check_pid == 0 {
+                    continue;
+                }
+
+                let mut proc_info: proc_bsdinfo = unsafe { mem::zeroed() };
+                let ret = unsafe {
+                    proc_pidinfo(
+                        check_pid,
+                        PROC_PIDTBSDINFO,
+                        0,
+                        &mut proc_info as *mut _ as *mut libc::c_void,
+                        mem::size_of::<proc_bsdinfo>() as libc::c_int,
+                    )
+                };
+
+                if ret == mem::size_of::<proc_bsdinfo>() as libc::c_int && proc_info.pbi_ppid == pid
+                {
+                    children.push(check_pid as u32);
+                }
+            }
+
+            Ok(children)
+        })
     }
 }
 
