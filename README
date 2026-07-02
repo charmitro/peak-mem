@@ -2,13 +2,113 @@ peak-mem
 
 Monitor peak memory usage of processes.
 
+    $ peak-mem -- cargo build
+       Compiling peak-mem v0.1.4
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.66s
+    Command: cargo build
+    Peak memory usage: 325.3 MiB (RSS) / 1.1 GiB (VSZ)
+    Exit code: 0
+    Duration: 0.7s
+
+peak-mem runs a command, samples the memory of the process and all
+of its children, and reports the peak RSS (resident set size) and
+VSZ (virtual size) when the command exits. It forwards stdio and
+signals and exits with the command's exit code, so it can wrap
+builds, tests, servers and scripts transparently.
+
+COMPARISON WITH STANDARD TOOLS
+
+    /usr/bin/time -v (GNU) and time -l (BSD/macOS) are exact,
+    preinstalled and the right choice when you want the peak of a
+    single process. cgroup v2's memory.peak is exact and tree-wide
+    where a cgroup can be set up. peak-mem covers the case in
+    between: an unprivileged, no-setup view of a whole process
+    tree, with some reporting conveniences on top.
+
+                            GNU      BSD/macOS  cgroup   peak-mem
+                            time -v  time -l    v2
+    whole-tree peak (sum)   no [1]   no [1]     yes      yes
+    exact (not sampled)     yes      yes        yes      no [2]
+    memory timeline         no       no         no       yes
+    live watch mode         no       no         no       yes
+    JSON / CSV output       no       no         no       yes
+    regression baselines    no       no         no       yes
+    no setup needed         yes      yes        no [3]   yes
+    platforms               Linux    BSD/macOS  Linux    Linux/macOS/
+                                                         FreeBSD
+
+    [1] By design: getrusage() reports the maximum RSS of any single
+        waited-for process, which answers a different question than
+        the sum of a tree running concurrently. For a build that
+        spawns eight 300 MiB compilers in parallel, it reports
+        300 MiB, while the machine needed 2.4 GiB at once - the
+        number peak-mem reports.
+
+    [2] peak-mem samples (default: every 100ms), so a spike shorter
+        than the interval can be missed. Lower --interval to narrow
+        the window, at slightly higher overhead.
+
+    [3] Where a writable cgroup is available (delegation or root),
+        cgroup v2 is the most accurate option; peak-mem trades that
+        exactness for working anywhere without setup.
+
+MEMORY REGRESSION DETECTION
+
+    Save a baseline once, then compare later runs against it.
+    peak-mem exits 1 when peak RSS grows more than the threshold
+    (default: 10%), which is all a CI job needs:
+
+    $ peak-mem --save-baseline v0.1.4 -- cargo build
+    $ peak-mem --compare-baseline v0.1.4 -- cargo build
+    Command: cargo build
+
+    Baseline vs Current:
+      Peak RSS: 320.4 MiB → 322.4 MiB (+0.6%)
+      Absolute increase: 2.0 MiB
+
+      Peak VSZ: 1.1 GiB → 981.2 MiB (-10.2%)
+
+      Duration: 0.7s → 0.7s (+0.1%)
+
+    ✅ No regression detected
+
+    Use a stricter threshold to fail CI on a 5% increase:
+
+    peak-mem --compare-baseline v1.0 --regression-threshold 5 -- ./myapp
+
+    Baselines are JSON files stored in ~/.cache/peak-mem/baselines/
+    by default; --baseline-dir keeps them elsewhere. Manage them
+    with --list-baselines and --delete-baseline. Comparisons respect
+    the --json, --csv and --quiet output formats.
+
+MORE VIEWS
+
+    Per-process breakdown of the tree at its peak (-v):
+
+    $ peak-mem -v -- cargo build
+    Command: cargo build
+    ...
+    Process Tree: (2 processes monitored)
+    cargo (PID: 2550839) - Peak: 46.7 MiB
+    rustc (PID: 2550850) - Peak: 275.5 MiB
+
+    Live display while the command runs (-w); the two lines redraw
+    in place and are cleared on exit:
+
+    Current RSS: 229.2 MiB | Peak RSS: 321.0 MiB
+    Current VSZ: 983.2 MiB | Peak VSZ: 983.2 MiB
+
+    Full timeline recorded to a file for later analysis:
+
+    peak-mem --timeline mem.json -- ./app
+
 INSTALLATION
 
-    Install from a local path:
-    cargo install --path .
-
-    Or install directly from https://crates.io/crates/peak-mem:
+    Install from https://crates.io/crates/peak-mem:
     cargo install peak-mem
+
+    Or from a local checkout:
+    cargo install --path .
 
 USAGE
 
@@ -29,10 +129,6 @@ OPTIONS
     --interval MS           Sampling interval (default: 100)
     --units UNIT            Force memory units (B, KB, MB, GB, KiB, MiB, GiB)
 
-    Unit suffixes without an "i" are decimal (KB = 1000 bytes); with
-    an "i" they are binary (KiB = 1024 bytes). This applies to both
-    --threshold input and displayed output.
-
     Memory Regression Detection:
     --save-baseline NAME    Save current run as baseline
     --compare-baseline NAME Compare against saved baseline
@@ -41,33 +137,24 @@ OPTIONS
     --list-baselines        List all saved baselines
     --delete-baseline NAME  Delete a saved baseline
 
+MEMORY UNITS
+
+    Unit suffixes without an "i" are decimal (KB = 1000 bytes); with
+    an "i" they are binary (KiB = 1024 bytes). This applies to both
+    --threshold input and displayed output. Automatic sizing in
+    human-readable output uses binary units.
+
 EXAMPLES
 
-    Basic usage:
-    peak-mem -- cargo build
-
-    JSON output:
-    peak-mem --json -- ./myapp
-
-    Set 1GB threshold:
+    Set a 1 GB threshold (exit 1 if exceeded):
     peak-mem --threshold 1G -- ./test
+
+    Machine-readable output for scripts:
+    peak-mem --json -- ./myapp
+    peak-mem --quiet -- ./myapp
 
     Force output in megabytes:
     peak-mem --units MB -- ./myapp
-
-    Memory regression detection:
-    # Save a baseline
-    peak-mem --save-baseline v1.0 -- ./myapp
-
-    # Compare against baseline
-    peak-mem --compare-baseline v1.0 -- ./myapp
-
-    # Use stricter threshold (5% increase = regression)
-    peak-mem --compare-baseline v1.0 --regression-threshold 5 -- ./myapp
-
-    # List and manage baselines
-    peak-mem --list-baselines
-    peak-mem --delete-baseline v1.0
 
 BUILDING
 
@@ -83,22 +170,6 @@ INSTALLING MANPAGE
 
     View the manpage:
     man peak-mem
-
-MEMORY REGRESSION DETECTION
-
-    Peak-mem can save memory usage baselines and compare subsequent runs
-    to detect memory regressions. This is useful for:
-
-    - CI/CD pipelines to catch memory regressions
-    - Comparing memory usage before/after optimizations
-    - Tracking memory usage across releases
-
-    Baselines are stored in ~/.cache/peak-mem/baselines/ by default.
-    When comparing, peak-mem will:
-
-    1. Report percentage changes in RSS, VSZ, and duration
-    2. Exit with code 1 if RSS increases exceed the threshold
-    3. Support multiple output formats (human, JSON, CSV, quiet)
 
 PLATFORM SUPPORT
 
