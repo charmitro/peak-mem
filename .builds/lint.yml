@@ -15,3 +15,10 @@ tasks:
   - fmt-check: |
       cd peak-mem
       cargo +nightly fmt --check
+  - cross-check: |
+      cd peak-mem
+      rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-freebsd
+      for t in aarch64-unknown-linux-gnu x86_64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-freebsd; do
+        echo "== $t"
+        cargo check --target "$t"
+      done
