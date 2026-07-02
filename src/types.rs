@@ -159,6 +159,100 @@ impl Timestamp {
             year, month, day, hours, mins, secs
         )
     }
+
+    /// Parses an RFC3339 timestamp string, as written by
+    /// [`Timestamp::to_rfc3339`].
+    ///
+    /// Accepts an optional fractional-seconds part and either `Z` or a
+    /// numeric UTC offset, which is normalized away.
+    fn parse_rfc3339(s: &str) -> Result<Self> {
+        let invalid = || PeakMemError::Parse(format!("invalid RFC3339 timestamp: '{s}'"));
+
+        let b = s.as_bytes();
+        if b.len() < 20
+            || b[4] != b'-'
+            || b[7] != b'-'
+            || !matches!(b[10], b'T' | b't' | b' ')
+            || b[13] != b':'
+            || b[16] != b':'
+        {
+            return Err(invalid());
+        }
+
+        let digits = |range: std::ops::Range<usize>| -> Option<u64> {
+            let part = s.get(range)?;
+            if !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()) {
+                part.parse().ok()
+            } else {
+                None
+            }
+        };
+
+        let year = digits(0..4).ok_or_else(invalid)? as i64;
+        let month = digits(5..7).ok_or_else(invalid)? as u32;
+        let day = digits(8..10).ok_or_else(invalid)? as u32;
+        let hour = digits(11..13).ok_or_else(invalid)?;
+        let min = digits(14..16).ok_or_else(invalid)?;
+        let sec = digits(17..19).ok_or_else(invalid)?;
+
+        if !(1..=12).contains(&month)
+            || !(1..=31).contains(&day)
+            || hour > 23
+            || min > 59
+            || sec > 60
+        {
+            return Err(invalid());
+        }
+
+        // Optional fractional seconds, truncated to nanosecond precision.
+        let mut idx = 19;
+        let mut nanos = 0u32;
+        if b[idx] == b'.' {
+            let start = idx + 1;
+            idx = start;
+            while idx < b.len() && b[idx].is_ascii_digit() {
+                idx += 1;
+            }
+            let frac = &s[start..idx.min(start + 9)];
+            if frac.is_empty() {
+                return Err(invalid());
+            }
+            nanos = frac.parse().map_err(|_| invalid())?;
+            for _ in frac.len()..9 {
+                nanos *= 10;
+            }
+        }
+
+        // Timezone: 'Z' or a +HH:MM/-HH:MM offset.
+        let offset_secs = match b.get(idx).copied() {
+            Some(b'Z') | Some(b'z') if idx + 1 == b.len() => 0i64,
+            Some(sign @ (b'+' | b'-')) if idx + 6 == b.len() && b[idx + 3] == b':' => {
+                let oh = digits(idx + 1..idx + 3).ok_or_else(invalid)?;
+                let om = digits(idx + 4..idx + 6).ok_or_else(invalid)?;
+                if oh > 23 || om > 59 {
+                    return Err(invalid());
+                }
+                let secs = (oh * 3600 + om * 60) as i64;
+                if sign == b'-' {
+                    -secs
+                } else {
+                    secs
+                }
+            }
+            _ => return Err(invalid()),
+        };
+
+        let days = days_from_civil(year, month, day);
+        let utc_secs = days * 86400 + (hour * 3600 + min * 60 + sec) as i64 - offset_secs;
+
+        let time = if utc_secs >= 0 {
+            UNIX_EPOCH + Duration::new(utc_secs as u64, nanos)
+        } else {
+            UNIX_EPOCH - Duration::from_secs(utc_secs.unsigned_abs()) + Duration::new(0, nanos)
+        };
+
+        Ok(Timestamp(time))
+    }
 }
 
 /// Converts days since the Unix epoch to a (year, month, day) civil date.
@@ -179,6 +273,19 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+/// Converts a (year, month, day) civil date to days since the Unix epoch.
+///
+/// Inverse of [`civil_from_days`], from the same source.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // year of era [0, 399]
+    let mp = if month > 2 { month - 3 } else { month + 9 } as i64; // March-based month [0, 11]
+    let doy = (153 * mp + 2) / 5 + day as i64 - 1; // day of year [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // day of era [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
 impl Serialize for Timestamp {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -193,9 +300,8 @@ impl<'de> Deserialize<'de> for Timestamp {
     where
         D: serde::Deserializer<'de>,
     {
-        let _s = String::deserialize(deserializer)?;
-        // For now, just return current time - proper parsing would be needed
-        Ok(Timestamp::now())
+        let s = String::deserialize(deserializer)?;
+        Timestamp::parse_rfc3339(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -310,7 +416,6 @@ pub enum PeakMemError {
     Io(std::io::Error),
 
     /// Failed to parse system data.
-    #[allow(dead_code)] // Used in Linux implementation
     Parse(String),
 
     /// Invalid command-line argument.
@@ -399,6 +504,49 @@ mod tests {
 
         let epoch = Timestamp(UNIX_EPOCH);
         assert_eq!(epoch.to_rfc3339(), "1970-01-01T00:00:00.000000+00:00");
+    }
+
+    #[test]
+    fn test_days_from_civil() {
+        for days in [-1, 0, 11016, 11017, 19875, -141428] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), days);
+        }
+    }
+
+    #[test]
+    fn test_timestamp_parse_rfc3339() {
+        let ts = Timestamp(UNIX_EPOCH + Duration::new(1_717_245_296, 500_000_000));
+
+        // Round-trip through the serialized format
+        assert_eq!(Timestamp::parse_rfc3339(&ts.to_rfc3339()).unwrap(), ts);
+
+        // 'Z' suffix and second-only precision
+        let z = Timestamp::parse_rfc3339("2024-06-01T12:34:56Z").unwrap();
+        assert_eq!(
+            z,
+            Timestamp(UNIX_EPOCH + Duration::from_secs(1_717_245_296))
+        );
+
+        // Numeric offsets are normalized to UTC
+        let east = Timestamp::parse_rfc3339("2024-06-01T14:34:56+02:00").unwrap();
+        assert_eq!(east, z);
+        let west = Timestamp::parse_rfc3339("2024-06-01T05:04:56-07:30").unwrap();
+        assert_eq!(west, z);
+
+        assert!(Timestamp::parse_rfc3339("not a timestamp").is_err());
+        assert!(Timestamp::parse_rfc3339("2024-13-01T00:00:00Z").is_err());
+        assert!(Timestamp::parse_rfc3339("2024-06-01T24:00:00Z").is_err());
+        assert!(Timestamp::parse_rfc3339("2024-06-01T12:34:56").is_err()); // missing tz
+        assert!(Timestamp::parse_rfc3339("2024-06-01T12:34:56.Z").is_err()); // empty fraction
+    }
+
+    #[test]
+    fn test_timestamp_serde_round_trip() {
+        let ts = Timestamp(UNIX_EPOCH + Duration::new(1_717_245_296, 123_456_000));
+        let json = serde_json::to_string(&ts).unwrap();
+        let back: Timestamp = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ts);
     }
 
     #[test]
