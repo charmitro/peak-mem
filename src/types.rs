@@ -120,18 +120,18 @@ impl Timestamp {
         let total_secs = duration.as_secs();
         let nanos = duration.subsec_nanos();
 
-        // Simple UTC timestamp formatting
-        // This is a basic implementation - real RFC3339 needs proper date calculation
+        let (year, month, day) = civil_from_days((total_secs / 86400) as i64);
         let secs_today = total_secs % 86400;
 
         let hours = secs_today / 3600;
         let mins = (secs_today % 3600) / 60;
         let secs = secs_today % 60;
 
-        // Approximate date (days since epoch - not accurate for display but works for
-        // testing) For production, would need proper date calculation
         format!(
-            "2025-09-06T{:02}:{:02}:{:02}.{:06}+00:00",
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}+00:00",
+            year,
+            month,
+            day,
             hours,
             mins,
             secs,
@@ -147,14 +147,36 @@ impl Timestamp {
             .unwrap_or_else(|_| Duration::from_secs(0));
 
         let total_secs = duration.as_secs();
+        let (year, month, day) = civil_from_days((total_secs / 86400) as i64);
         let secs_today = total_secs % 86400;
 
         let hours = secs_today / 3600;
         let mins = (secs_today % 3600) / 60;
         let secs = secs_today % 60;
 
-        format!("2025-09-06 {:02}:{:02}:{:02}", hours, mins, secs)
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            year, month, day, hours, mins, secs
+        )
     }
+}
+
+/// Converts days since the Unix epoch to a (year, month, day) civil date.
+///
+/// Based on Howard Hinnant's `civil_from_days` algorithm
+/// (https://howardhinnant.github.io/date_algorithms.html), valid for
+/// all dates in the proleptic Gregorian calendar.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // day of era [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // year of era [0, 399]
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
+    let mp = (5 * doy + 2) / 153; // March-based month [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 impl Serialize for Timestamp {
@@ -358,6 +380,26 @@ pub type Result<T> = std::result::Result<T, PeakMemError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_civil_from_days() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(civil_from_days(11016), (2000, 2, 29)); // leap day
+        assert_eq!(civil_from_days(11017), (2000, 3, 1));
+        assert_eq!(civil_from_days(19875), (2024, 6, 1));
+    }
+
+    #[test]
+    fn test_timestamp_formatting() {
+        // 2024-06-01T12:34:56.5Z
+        let ts = Timestamp(UNIX_EPOCH + Duration::new(1_717_245_296, 500_000_000));
+        assert_eq!(ts.to_rfc3339(), "2024-06-01T12:34:56.500000+00:00");
+        assert_eq!(ts.format_datetime(), "2024-06-01 12:34:56");
+
+        let epoch = Timestamp(UNIX_EPOCH);
+        assert_eq!(epoch.to_rfc3339(), "1970-01-01T00:00:00.000000+00:00");
+    }
 
     #[test]
     fn test_memory_usage_creation() {
