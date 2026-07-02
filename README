@@ -29,6 +29,10 @@ OPTIONS
     --interval MS           Sampling interval (default: 100)
     --units UNIT            Force memory units (B, KB, MB, GB, KiB, MiB, GiB)
 
+    Unit suffixes without an "i" are decimal (KB = 1000 bytes); with
+    an "i" they are binary (KiB = 1024 bytes). This applies to both
+    --threshold input and displayed output.
+
     Memory Regression Detection:
     --save-baseline NAME    Save current run as baseline
     --compare-baseline NAME Compare against saved baseline

@@ -89,7 +89,7 @@ pub struct Cli {
         short = 't',
         long = "threshold",
         value_name = "SIZE",
-        help = "Set memory threshold (e.g., 512M, 1G)",
+        help = "Set memory threshold (e.g., 512M, 1G; KB/MB/GB are powers of 1000, KiB/MiB/GiB powers of 1024)",
         value_parser = parse_threshold
     )]
     pub threshold: Option<ByteSize>,

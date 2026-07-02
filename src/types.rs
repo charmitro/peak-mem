@@ -32,13 +32,13 @@ impl fmt::Display for ByteSize {
         if bytes < 1024.0 {
             write!(f, "{} B", self.0)
         } else if bytes < 1024.0 * 1024.0 {
-            write!(f, "{:.1} KB", bytes / 1024.0)
+            write!(f, "{:.1} KiB", bytes / 1024.0)
         } else if bytes < 1024.0 * 1024.0 * 1024.0 {
-            write!(f, "{:.1} MB", bytes / (1024.0 * 1024.0))
+            write!(f, "{:.1} MiB", bytes / (1024.0 * 1024.0))
         } else if bytes < 1024.0 * 1024.0 * 1024.0 * 1024.0 {
-            write!(f, "{:.1} GB", bytes / (1024.0 * 1024.0 * 1024.0))
+            write!(f, "{:.1} GiB", bytes / (1024.0 * 1024.0 * 1024.0))
         } else {
-            write!(f, "{:.1} TB", bytes / (1024.0 * 1024.0 * 1024.0 * 1024.0))
+            write!(f, "{:.1} TiB", bytes / (1024.0 * 1024.0 * 1024.0 * 1024.0))
         }
     }
 }
@@ -76,13 +76,15 @@ impl FromStr for ByteSize {
             .parse()
             .map_err(|_| PeakMemError::InvalidArgument(format!("Invalid number: '{}'", num_str)))?;
 
+        // Units without an 'i' are decimal (SI, powers of 1000); units
+        // with an 'i' are binary (IEC, powers of 1024).
         let unit = unit_str.trim().to_uppercase();
         let multiplier = match unit.as_str() {
             "" | "B" => 1.0,
-            "K" | "KB" => 1024.0,
-            "M" | "MB" => 1024.0 * 1024.0,
-            "G" | "GB" => 1024.0 * 1024.0 * 1024.0,
-            "T" | "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+            "K" | "KB" => 1000.0,
+            "M" | "MB" => 1000.0 * 1000.0,
+            "G" | "GB" => 1000.0 * 1000.0 * 1000.0,
+            "T" | "TB" => 1000.0 * 1000.0 * 1000.0 * 1000.0,
             "KIB" => 1024.0,
             "MIB" => 1024.0 * 1024.0,
             "GIB" => 1024.0 * 1024.0 * 1024.0,
@@ -487,6 +489,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_byte_size_parsing() {
+        // Plain numbers are bytes
+        assert_eq!("512".parse::<ByteSize>().unwrap(), ByteSize::b(512));
+
+        // Units without 'i' are decimal (SI)
+        assert_eq!("1KB".parse::<ByteSize>().unwrap(), ByteSize::b(1000));
+        assert_eq!("1K".parse::<ByteSize>().unwrap(), ByteSize::b(1000));
+        assert_eq!(
+            "512M".parse::<ByteSize>().unwrap(),
+            ByteSize::b(512_000_000)
+        );
+        assert_eq!(
+            "1G".parse::<ByteSize>().unwrap(),
+            ByteSize::b(1_000_000_000)
+        );
+        assert_eq!(
+            "1.5GB".parse::<ByteSize>().unwrap(),
+            ByteSize::b(1_500_000_000)
+        );
+
+        // Units with 'i' are binary (IEC)
+        assert_eq!("1KiB".parse::<ByteSize>().unwrap(), ByteSize::b(1024));
+        assert_eq!("1MiB".parse::<ByteSize>().unwrap(), ByteSize::b(1_048_576));
+        assert_eq!(
+            "1GiB".parse::<ByteSize>().unwrap(),
+            ByteSize::b(1_073_741_824)
+        );
+
+        assert!("1XB".parse::<ByteSize>().is_err());
+        assert!("".parse::<ByteSize>().is_err());
+    }
+
+    #[test]
+    fn test_byte_size_display() {
+        assert_eq!(ByteSize::b(512).to_string(), "512 B");
+        assert_eq!(ByteSize::b(1024).to_string(), "1.0 KiB");
+        assert_eq!(ByteSize::b(1_048_576).to_string(), "1.0 MiB");
+        assert_eq!(ByteSize::b(1_073_741_824).to_string(), "1.0 GiB");
+    }
+
+    #[test]
     fn test_civil_from_days() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
@@ -578,8 +621,8 @@ mod tests {
             main_pid: None,
         };
 
-        assert_eq!(result.peak_rss().to_string(), "100.0 MB");
-        assert_eq!(result.peak_vsz().to_string(), "200.0 MB");
+        assert_eq!(result.peak_rss().to_string(), "100.0 MiB");
+        assert_eq!(result.peak_vsz().to_string(), "200.0 MiB");
         assert_eq!(result.duration().as_secs(), 5);
     }
 }

@@ -39,8 +39,9 @@ Display real-time memory usage during execution. Updates the display
 continuously as the process runs.
 .TP
 .BR \-t ", " \-\-threshold " " \fISIZE\fR
-Set a memory threshold alert. Accepts values like 512M, 1G, 2GB.
+Set a memory threshold alert. Accepts values like 512M, 1G, 2GiB.
 The program will indicate if the threshold is exceeded.
+See MEMORY UNITS for how unit suffixes are interpreted.
 .TP
 .B \-\-no\-children
 Don't track child processes. By default, peak-mem monitors the entire
@@ -60,6 +61,7 @@ sizing. Supported units: B (bytes), KB (kilobytes), MB (megabytes),
 GB (gigabytes), KiB (kibibytes), MiB (mebibytes), GiB (gibibytes).
 This option affects all human-readable output including verbose mode
 and baseline comparisons.
+See MEMORY UNITS for how unit suffixes are interpreted.
 .SS Baseline Management Options
 .TP
 .BR \-\-save\-baseline " " \fINAME\fR
@@ -166,7 +168,7 @@ List and manage baselines:
 .RE
 .SH OUTPUT FORMATS
 .SS Human-readable (default)
-Shows peak RSS and VSZ in human-readable units (KB, MB, GB) along with
+Shows peak RSS and VSZ in human-readable units (KiB, MiB, GiB) along with
 the monitored command and exit status.
 .SS JSON Format (-j)
 Outputs a JSON object containing:
@@ -197,16 +199,19 @@ Outputs only the peak RSS value in bytes as a plain number.
 Shows detailed process tree with individual memory usage for each process,
 including PIDs and process names.
 .SH MEMORY UNITS
-Memory sizes can be specified using the following units:
+Unit suffixes without an \(lqi\(rq are decimal (SI, powers of 1000);
+suffixes with an \(lqi\(rq are binary (IEC, powers of 1024). This
+convention applies consistently to both input (\-\-threshold) and
+output (\-\-units and automatic sizing, which uses binary units).
 .RS
 .IP \(bu 2
-K, KB: Kilobytes (1024 bytes)
+No suffix, B: bytes
 .IP \(bu 2
-M, MB: Megabytes (1024² bytes)
+K, KB: kilobytes (1000 bytes); M, MB: megabytes (1000\(S2 bytes);
+G, GB: gigabytes (1000\(S3 bytes); T, TB: terabytes (1000\(S4 bytes)
 .IP \(bu 2
-G, GB: Gigabytes (1024³ bytes)
-.IP \(bu 2
-No suffix: bytes
+KiB: kibibytes (1024 bytes); MiB: mebibytes (1024\(S2 bytes);
+GiB: gibibytes (1024\(S3 bytes); TiB: tebibytes (1024\(S4 bytes)
 .RE
 .SH EXIT STATUS
 .B peak-mem
