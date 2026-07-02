@@ -3,7 +3,7 @@
 //! This module provides functionality to save memory usage snapshots as
 //! baselines and compare new measurements against them to detect regressions.
 
-use crate::types::{MonitorResult, Result, Timestamp};
+use crate::types::{MonitorResult, PeakMemError, Result, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -197,7 +197,7 @@ impl BaselineManager {
     /// * Path to the saved baseline file
     pub fn save_baseline(&self, name: &str, result: &MonitorResult) -> Result<PathBuf> {
         let baseline = Baseline::from(result);
-        let filename = format!("{}.json", sanitize_filename(name));
+        let filename = format!("{}.json", sanitize_filename(name)?);
         let path = self.baselines_dir.join(&filename);
 
         let json = serde_json::to_string_pretty(&baseline)?;
@@ -207,7 +207,7 @@ impl BaselineManager {
     }
 
     pub fn load_baseline(&self, name: &str) -> Result<Baseline> {
-        let filename = format!("{}.json", sanitize_filename(name));
+        let filename = format!("{}.json", sanitize_filename(name)?);
         let path = self.baselines_dir.join(&filename);
 
         let json = fs::read_to_string(&path)?;
@@ -235,7 +235,7 @@ impl BaselineManager {
     }
 
     pub fn delete_baseline(&self, name: &str) -> Result<()> {
-        let filename = format!("{}.json", sanitize_filename(name));
+        let filename = format!("{}.json", sanitize_filename(name)?);
         let path = self.baselines_dir.join(&filename);
         fs::remove_file(&path)?;
         Ok(())
@@ -258,13 +258,28 @@ impl BaselineManager {
     }
 }
 
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
+/// Sanitizes a baseline name for use as a file name.
+///
+/// Path separators and characters that are invalid in file names on
+/// some platforms are replaced with '_'. Names that are empty or
+/// consist only of dots (".", "..") are rejected rather than mangled,
+/// since they would name the current or parent directory.
+fn sanitize_filename(name: &str) -> Result<String> {
+    let sanitized: String = name
+        .chars()
         .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' => '_',
             _ => c,
         })
-        .collect()
+        .collect();
+
+    if sanitized.is_empty() || sanitized.chars().all(|c| c == '.') {
+        return Err(PeakMemError::InvalidArgument(format!(
+            "Invalid baseline name: '{name}'"
+        )));
+    }
+
+    Ok(sanitized)
 }
 
 #[cfg(test)]
@@ -340,9 +355,16 @@ mod tests {
 
     #[test]
     fn test_sanitize_filename() {
-        assert_eq!(sanitize_filename("test/file"), "test_file");
-        assert_eq!(sanitize_filename("test:file"), "test_file");
-        assert_eq!(sanitize_filename("test*file"), "test_file");
-        assert_eq!(sanitize_filename("normal_file"), "normal_file");
+        assert_eq!(sanitize_filename("test/file").unwrap(), "test_file");
+        assert_eq!(sanitize_filename("test:file").unwrap(), "test_file");
+        assert_eq!(sanitize_filename("test*file").unwrap(), "test_file");
+        assert_eq!(sanitize_filename("normal_file").unwrap(), "normal_file");
+        assert_eq!(sanitize_filename("../../etc/x").unwrap(), ".._.._etc_x");
+
+        // Names that would resolve to a directory entry are rejected
+        assert!(sanitize_filename("").is_err());
+        assert!(sanitize_filename(".").is_err());
+        assert!(sanitize_filename("..").is_err());
+        assert!(sanitize_filename("...").is_err());
     }
 }
