@@ -337,23 +337,31 @@ async fn run_with_realtime_display(
     interval_ms: u64,
     units: Option<cli::MemoryUnit>,
 ) -> Result<Option<i32>> {
-    let pid = handle.pid();
-    let monitor = monitor::create_monitor()?;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
     let peak_rss_atom = tracker.peak_rss.clone();
     let peak_vsz_atom = tracker.peak_vsz.clone();
+    // Read current values from the tracker's own samples so that
+    // "current" and "peak" agree on what is being measured (the whole
+    // process tree unless --no-children was given).
+    let timeline = tracker.timeline_handle();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stop);
 
     let monitor_task = tokio::spawn(async move {
         let mut display = RealtimeDisplay::new(units);
         let mut interval = time::interval(time::Duration::from_millis(interval_ms));
 
-        loop {
+        while !stop_flag.load(Ordering::SeqCst) {
             interval.tick().await;
 
-            if let Ok(usage) = monitor.get_memory_usage(pid).await {
+            let latest = timeline.read().await.last().cloned();
+            if let Some(usage) = latest {
                 let current_rss = ByteSize::b(usage.rss_bytes);
                 let current_vsz = ByteSize::b(usage.vsz_bytes);
-                let peak_rss = ByteSize::b(peak_rss_atom.load(std::sync::atomic::Ordering::SeqCst));
-                let peak_vsz = ByteSize::b(peak_vsz_atom.load(std::sync::atomic::Ordering::SeqCst));
+                let peak_rss = ByteSize::b(peak_rss_atom.load(Ordering::SeqCst));
+                let peak_vsz = ByteSize::b(peak_vsz_atom.load(Ordering::SeqCst));
 
                 if display
                     .update(current_rss, peak_rss, current_vsz, peak_vsz)
@@ -361,9 +369,6 @@ async fn run_with_realtime_display(
                 {
                     break;
                 }
-            } else {
-                // Process terminated
-                break;
             }
         }
 
@@ -371,7 +376,8 @@ async fn run_with_realtime_display(
     });
 
     let exit_code = handle.wait_with_signal_forwarding().await?;
-    monitor_task.abort();
+    stop.store(true, Ordering::SeqCst);
+    let _ = monitor_task.await;
 
     Ok(exit_code)
 }

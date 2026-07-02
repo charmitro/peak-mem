@@ -192,6 +192,14 @@ impl MemoryTracker {
         self.timeline.read().await.clone()
     }
 
+    /// Returns a shared handle to the collected timeline samples.
+    ///
+    /// Allows other tasks (e.g. the watch-mode display) to observe the
+    /// most recent sample without querying the platform monitor again.
+    pub fn timeline_handle(&self) -> Arc<RwLock<Vec<MemoryUsage>>> {
+        Arc::clone(&self.timeline)
+    }
+
     /// Returns the number of samples collected.
     pub fn sample_count(&self) -> u64 {
         self.sample_count.load(Ordering::SeqCst)
