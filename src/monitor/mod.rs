@@ -18,9 +18,6 @@ pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
-#[cfg(windows)]
-pub mod windows;
-
 #[cfg(target_os = "freebsd")]
 pub mod freebsd;
 
@@ -92,22 +89,12 @@ pub fn create_monitor() -> Result<Box<dyn MemoryMonitor>> {
         Ok(Box::new(macos::MacOSMonitor::new()?))
     }
 
-    #[cfg(windows)]
-    {
-        Ok(Box::new(windows::WindowsMonitor::new()?))
-    }
-
     #[cfg(target_os = "freebsd")]
     {
         Ok(Box::new(freebsd::FreeBSDMonitor::new()?))
     }
 
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        windows,
-        target_os = "freebsd"
-    )))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
     {
         Err(crate::types::PeakMemError::UnsupportedPlatform(
             std::env::consts::OS.to_string(),
