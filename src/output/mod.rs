@@ -287,7 +287,7 @@ impl OutputFormatter {
 
         // Sort children by peak RSS (descending)
         let mut children = tree.children.clone();
-        children.sort_by(|a, b| b.memory.rss_bytes.cmp(&a.memory.rss_bytes));
+        children.sort_by_key(|child| std::cmp::Reverse(child.memory.rss_bytes));
 
         // Print children with proper tree structure
         let child_prefix = format!(
