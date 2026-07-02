@@ -222,7 +222,7 @@ impl OutputFormatter {
         }
         writeln!(
             stdout,
-            "  Sampling interval: {}ms",
+            "  Effective sample interval: {}ms",
             result.duration_ms / result.sample_count.unwrap_or(1).max(1)
         )?;
         writeln!(stdout)?;
