@@ -2,7 +2,10 @@
 name = "peak-mem"
 version = "0.1.3"
 edition = "2021"
-authors = ["Peak-mem Development Team"]
+authors = [
+    "Charalampos Mitrodimas <charmitro@posteo.net>",
+    "Panagiotis Foliadis <pfoliadis@posteo.net>",
+]
 description = "Lightweight memory usage monitor for any process"
 repository = "https://git.sr.ht/~charmitro/peak-mem"
 license = "MIT"
